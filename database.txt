@@ -1,0 +1,392 @@
+-- create_db.sql
+-- Script complet de création : base, rôles, schéma app, tables, historiques, trigger générique.
+-- Exécuter en tant que superutilisateur PostgreSQL (ex: user "postgres").
+-- IMPORTANT : remplacer les mots de passe 'CHANGE_ME_*' après exécution par un secret manager.
+
+-- 0) Variables à personnaliser (modifie si besoin)
+-- DB_NAME: nom de la base de données à créer
+-- OWNER_DBA: propriétaire principal (DBA)
+-- Remplace si nécessaire avant exécution.
+\echo '--- Début du script de création de la DB ---'
+
+-- 1) Création des rôles (utilisateurs)
+-- Remplacer les mots de passe par des secrets forts : utiliser un secret manager en production.
+
+DO $$
+BEGIN
+  -- Create roles only if not exists
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dba') THEN
+    PERFORM pg_catalog.pg_create_role('dba', true, false, false, false, false, false, false, ''); -- NOLOGIN role (owner)
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
+    EXECUTE format('CREATE ROLE app_user LOGIN PASSWORD %L;', 'CHANGE_ME_APP_USER');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'db_migrator') THEN
+    EXECUTE format('CREATE ROLE db_migrator LOGIN PASSWORD %L;', 'CHANGE_ME_MIGRATOR');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'backup_user') THEN
+    EXECUTE format('CREATE ROLE backup_user LOGIN PASSWORD %L;', 'CHANGE_ME_BACKUP');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'auditor') THEN
+    CREATE ROLE auditor NOLOGIN;
+  END IF;
+END
+$$;
+
+-- 2) Création de la base de données
+-- Change DB name if needed
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'realtech_db') THEN
+    PERFORM dblink_connect('dbname=postgres');
+    -- create database owned by dba
+    EXECUTE 'CREATE DATABASE realtech_db OWNER dba';
+    PERFORM dblink_disconnect();
+  END IF;
+END
+$$;
+
+-- Note : si dblink non installé, simple CREATE DATABASE sous superuser ci-dessous :
+-- (La section ci-dessus tente d'éviter conflit, mais si erreur, exécute manuellement :)
+-- CREATE DATABASE realtech_db OWNER dba;
+
+\connect realtech_db
+
+-- 3) Extensions nécessaires
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";  -- gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS "plpgsql";
+
+-- 4) Créer le schema 'app' et en définir le propriétaire
+CREATE SCHEMA IF NOT EXISTS app AUTHORIZATION dba;
+
+-- 5) Créer les tables principales (schéma app)
+SET search_path = app, public;
+
+-- roles
+CREATE TABLE IF NOT EXISTS app.roles (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT
+);
+
+-- users
+CREATE TABLE IF NOT EXISTS app.users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  full_name TEXT,
+  phone TEXT,
+  is_active BOOLEAN DEFAULT TRUE,
+  email_verified_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- user_roles
+CREATE TABLE IF NOT EXISTS app.user_roles (
+  user_id UUID NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+  role_id INT NOT NULL REFERENCES app.roles(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, role_id)
+);
+
+-- categories
+CREATE TABLE IF NOT EXISTS app.categories (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  slug TEXT NOT NULL UNIQUE,
+  description TEXT,
+  parent_id INT REFERENCES app.categories(id) ON DELETE SET NULL,
+  image_url TEXT
+);
+
+-- products
+CREATE TABLE IF NOT EXISTS app.products (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sku TEXT UNIQUE,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL UNIQUE,
+  description TEXT,
+  price NUMERIC(12,2) NOT NULL,
+  stock INT NOT NULL DEFAULT 0,
+  is_active BOOLEAN DEFAULT TRUE,
+  category_id INT REFERENCES app.categories(id),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_products_slug ON app.products (slug);
+CREATE INDEX IF NOT EXISTS idx_products_price ON app.products (price);
+CREATE INDEX IF NOT EXISTS idx_products_active_stock ON app.products (is_active, stock);
+
+-- product_images
+CREATE TABLE IF NOT EXISTS app.product_images (
+  id SERIAL PRIMARY KEY,
+  product_id UUID NOT NULL REFERENCES app.products(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  alt TEXT,
+  position INT DEFAULT 0
+);
+
+-- orders
+CREATE TABLE IF NOT EXISTS app.orders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES app.users(id),
+  status TEXT NOT NULL DEFAULT 'pending', -- pending, paid, shipped, cancelled
+  total_amount NUMERIC(12,2) NOT NULL,
+  placed_at TIMESTAMPTZ DEFAULT now(),
+  shipping_address JSONB,
+  billing_address JSONB,
+  metadata JSONB
+);
+
+-- order_items
+CREATE TABLE IF NOT EXISTS app.order_items (
+  id SERIAL PRIMARY KEY,
+  order_id UUID NOT NULL REFERENCES app.orders(id) ON DELETE CASCADE,
+  product_id UUID REFERENCES app.products(id),
+  product_name TEXT,
+  unit_price NUMERIC(12,2) NOT NULL,
+  quantity INT NOT NULL,
+  total NUMERIC(12,2) NOT NULL
+);
+
+-- payments
+CREATE TABLE IF NOT EXISTS app.payments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id UUID REFERENCES app.orders(id) ON DELETE CASCADE,
+  provider TEXT,
+  provider_payment_id TEXT,
+  amount NUMERIC(12,2),
+  status TEXT,
+  paid_at TIMESTAMPTZ
+);
+
+-- carts
+CREATE TABLE IF NOT EXISTS app.carts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES app.users(id),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- cart_items
+CREATE TABLE IF NOT EXISTS app.cart_items (
+  id SERIAL PRIMARY KEY,
+  cart_id UUID NOT NULL REFERENCES app.carts(id) ON DELETE CASCADE,
+  product_id UUID REFERENCES app.products(id),
+  quantity INT NOT NULL DEFAULT 1
+);
+
+-- posts (blog)
+CREATE TABLE IF NOT EXISTS app.posts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  author_id UUID REFERENCES app.users(id),
+  title TEXT NOT NULL,
+  slug TEXT NOT NULL UNIQUE,
+  content TEXT,
+  excerpt TEXT,
+  published BOOLEAN DEFAULT FALSE,
+  published_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- comments
+CREATE TABLE IF NOT EXISTS app.comments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  post_id UUID REFERENCES app.posts(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES app.users(id),
+  content TEXT NOT NULL,
+  is_visible BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- audit_logs
+CREATE TABLE IF NOT EXISTS app.audit_logs (
+  id BIGSERIAL PRIMARY KEY,
+  user_id UUID REFERENCES app.users(id),
+  action TEXT NOT NULL,
+  target_table TEXT,
+  target_id TEXT,
+  payload JSONB,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- attachments
+CREATE TABLE IF NOT EXISTS app.attachments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  url TEXT NOT NULL,
+  filename TEXT,
+  content_type TEXT,
+  size BIGINT,
+  uploaded_by UUID REFERENCES app.users(id),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- settings
+CREATE TABLE IF NOT EXISTS app.settings (
+  key TEXT PRIMARY KEY,
+  value JSONB,
+  description TEXT,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 6) Trigger utilitaire pour updated_at (ex: products, posts, users)
+CREATE OR REPLACE FUNCTION app.set_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$;
+
+-- Attacher trigger set_updated_at to tables that ont updated_at
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='app' AND table_name='products' AND column_name='updated_at') THEN
+    PERFORM (EXECUTE 'DROP TRIGGER IF EXISTS trg_products_set_updated_at ON app.products');
+    PERFORM (EXECUTE 'CREATE TRIGGER trg_products_set_updated_at BEFORE UPDATE ON app.products FOR EACH ROW EXECUTE FUNCTION app.set_updated_at()');
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='app' AND table_name='posts' AND column_name='updated_at') THEN
+    PERFORM (EXECUTE 'DROP TRIGGER IF EXISTS trg_posts_set_updated_at ON app.posts');
+    PERFORM (EXECUTE 'CREATE TRIGGER trg_posts_set_updated_at BEFORE UPDATE ON app.posts FOR EACH ROW EXECUTE FUNCTION app.set_updated_at()');
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='app' AND table_name='users' AND column_name='updated_at') THEN
+    PERFORM (EXECUTE 'DROP TRIGGER IF EXISTS trg_users_set_updated_at ON app.users');
+    PERFORM (EXECUTE 'CREATE TRIGGER trg_users_set_updated_at BEFORE UPDATE ON app.users FOR EACH ROW EXECUTE FUNCTION app.set_updated_at()');
+  END IF;
+END$$;
+
+-- 7) Fonction trigger générique d'historisation (INSERT / UPDATE / DELETE)
+CREATE OR REPLACE FUNCTION app.log_table_history()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  hist_table text;
+  pk text;
+  old_row jsonb;
+  new_row jsonb;
+  changed jsonb;
+  current_user_id text;
+BEGIN
+  hist_table := format('app.%s_history', TG_TABLE_NAME);
+
+  -- try to get current user from session variable
+  current_user_id := current_setting('app.current_user_id', true);
+
+  IF (TG_OP = 'DELETE') THEN
+    old_row := to_jsonb(OLD);
+    new_row := NULL;
+    pk := COALESCE(OLD.id::text, OLD.ID::text, OLD.uuid::text, OLD.uuid_user::text, NULL);
+    changed := jsonb_build_object('before', old_row);
+  ELSIF (TG_OP = 'INSERT') THEN
+    old_row := NULL;
+    new_row := to_jsonb(NEW);
+    pk := COALESCE(NEW.id::text, NEW.ID::text, NEW.uuid::text, NULL);
+    changed := jsonb_build_object('after', new_row);
+  ELSIF (TG_OP = 'UPDATE') THEN
+    old_row := to_jsonb(OLD);
+    new_row := to_jsonb(NEW);
+    pk := COALESCE(NEW.id::text, NEW.ID::text, NEW.uuid::text, NULL);
+    changed := (
+      SELECT jsonb_object_agg(k, jsonb_build_object('old', old_row->k, 'new', new_row->k))
+      FROM (
+        SELECT jsonb_object_keys(new_row) AS k
+      ) s
+      WHERE (old_row->s.k IS DISTINCT FROM new_row->s.k)
+    );
+  ELSE
+    RETURN NULL;
+  END IF;
+
+  BEGIN
+    EXECUTE format('INSERT INTO %s (operation, changed_at, changed_by, table_name, row_id, row_data, changed_fields, query)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', hist_table)
+    USING TG_OP, now(), current_user_id::uuid, TG_TABLE_NAME, pk, COALESCE(new_row, old_row), changed, NULL;
+  EXCEPTION WHEN undefined_table THEN
+    -- history table missing: don't fail the main operation
+    RAISE NOTICE 'Historique absent pour %, insertion ignoree', hist_table;
+  END;
+
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+
+-- 8) Créer les tables d'historique pour chaque table listée
+DO $$
+DECLARE
+  tables text[] := ARRAY[
+    'roles','users','user_roles','categories','products','product_images',
+    'orders','order_items','payments','carts','cart_items',
+    'posts','comments','audit_logs','attachments','settings'
+  ];
+  t text;
+BEGIN
+  FOREACH t IN ARRAY tables LOOP
+    EXECUTE format($f$
+      CREATE TABLE IF NOT EXISTS app.%1$s_history (
+        history_id BIGSERIAL PRIMARY KEY,
+        operation TEXT NOT NULL,
+        changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        changed_by UUID,
+        table_name TEXT NOT NULL,
+        row_id TEXT,
+        row_data JSONB,
+        changed_fields JSONB,
+        query TEXT
+      );
+      CREATE INDEX IF NOT EXISTS %1$s_history_row_id_idx ON app.%1$s_history (row_id);
+      CREATE INDEX IF NOT EXISTS %1$s_history_changed_at_idx ON app.%1$s_history (changed_at);
+    $f$, t);
+  END LOOP;
+END $$;
+
+-- 9) Attacher le trigger d'historique à chaque table
+DO $$
+DECLARE
+  tables text[] := ARRAY[
+    'roles','users','user_roles','categories','products','product_images',
+    'orders','order_items','payments','carts','cart_items',
+    'posts','comments','audit_logs','attachments','settings'
+  ];
+  t text;
+  trig_name text;
+BEGIN
+  FOREACH t IN ARRAY tables LOOP
+    trig_name := format('trg_%s_history', t);
+    -- drop if exists
+    EXECUTE format('DROP TRIGGER IF EXISTS %I ON app.%I;', trig_name, t);
+    -- create AFTER trigger (we want the final row state)
+    EXECUTE format('CREATE TRIGGER %I AFTER INSERT OR UPDATE OR DELETE ON app.%I FOR EACH ROW EXECUTE FUNCTION app.log_table_history();', trig_name, t);
+  END LOOP;
+END $$;
+
+-- 10) Grants & Privileges (Principle of least privilege)
+-- Grant schema usage and table privileges to app_user
+GRANT USAGE ON SCHEMA app TO app_user, db_migrator;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA app TO app_user;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA app TO app_user;
+
+-- Grants for migrator (wider)
+GRANT CREATE ON SCHEMA app TO db_migrator;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA app TO db_migrator;
+
+-- Auditor: lecture sur toutes les tables (y compris historiques)
+GRANT SELECT ON ALL TABLES IN SCHEMA app TO auditor;
+
+-- DBA: owner privileges (dba role already owner of schema)
+GRANT ALL PRIVILEGES ON SCHEMA app TO dba;
+
+-- Default privileges for future objects created by dba
+ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT ON TABLES TO auditor;
+ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT ALL ON TABLES TO db_migrator;
+
+-- 11) Revoke public access (hardening)
+REVOKE ALL ON SCHEMA app FROM PUBLIC;
+REVOKE ALL ON ALL TABLES IN SCHEMA app FROM PUBLIC;
+
+\echo '--- Script terminé : DB, schéma, tables et historisation créés ---'

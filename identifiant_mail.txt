@@ -1,0 +1,29 @@
+**************************************** Email Fatou ******************************************
+email : mariamediop@realtechprint.com
+
+mot de pass : MariameDiop@2
+
+**************************************** FIN ******************************************
+
+
+
+
+**************************************** Email Omar ******************************************
+email : omar@realtechprint.com
+
+mot de pass : OmarCamara@3
+
+**************************************** FIN ******************************************
+
+
+
+**************************************** Email Sidy ******************************************
+email : sidydiop.boss@realtechprint.com
+
+mot de pass : AmySidyboss@1
+
+**************************************** FIN ******************************************
+
+
+
+ lien vers la page de connection de la boite mail : https://mail.realtechprint.com/roundcube/

@@ -1,0 +1,204 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Models mapped to `app` schema tables
+
+model User {
+  id            String     @id @default(uuid()) @map("id")
+  email         String     @unique
+  passwordHash  String     @map("password_hash")
+  fullName      String?    @map("full_name")
+  phone         String?
+  isActive      Boolean    @default(true) @map("is_active")
+  emailVerified DateTime?  @map("email_verified_at")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+  roles         UserRole[]
+  posts         Post[]
+  orders        Order[]
+  carts         Cart[]
+
+  @@map("app.users")
+}
+
+model Role {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  description String?
+  users       UserRole[]
+
+  @@map("app.roles")
+}
+
+model UserRole {
+  user   User @relation(fields: [userId], references: [id])
+  userId String
+  role   Role @relation(fields: [roleId], references: [id])
+  roleId Int
+
+  @@id([userId, roleId])
+  @@map("app.user_roles")
+}
+
+model Category {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  slug        String    @unique
+  description String?
+  parentId    Int?
+  products    Product[]
+
+  @@map("app.categories")
+}
+
+model Product {
+  id          String         @id @default(uuid())
+  sku         String?        @unique
+  name        String
+  slug        String         @unique
+  description String?
+  price       Decimal        @db.Numeric(12, 2)
+  stock       Int            @default(0)
+  isActive    Boolean        @default(true) @map("is_active")
+  categoryId  Int?           @map("category_id")
+  category    Category?      @relation(fields: [categoryId], references: [id])
+  images      ProductImage[]
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  @@index([slug])
+  @@index([price])
+  @@index([isActive, stock])
+  @@map("app.products")
+}
+
+model ProductImage {
+  id        Int     @id @default(autoincrement())
+  productId String  @map("product_id")
+  product   Product @relation(fields: [productId], references: [id])
+  url       String
+  alt       String?
+  position  Int     @default(0)
+
+  @@map("app.product_images")
+}
+
+model Order {
+  id            String      @id @default(uuid())
+  userId        String?     @map("user_id")
+  user          User?       @relation(fields: [userId], references: [id])
+  status        String      @default("pending")
+  totalAmount   Decimal     @map("total_amount") @db.Numeric(12, 2)
+  placedAt      DateTime?   @map("placed_at")
+  shippingAddr  Json?       @map("shipping_address")
+  billingAddr   Json?       @map("billing_address")
+  metadata      Json?
+  items         OrderItem[]
+
+  @@map("app.orders")
+}
+
+model OrderItem {
+  id         Int     @id @default(autoincrement())
+  orderId    String  @map("order_id")
+  order      Order   @relation(fields: [orderId], references: [id])
+  productId  String? @map("product_id")
+  productName String? @map("product_name")
+  unitPrice  Decimal @map("unit_price") @db.Numeric(12, 2)
+  quantity   Int
+  total      Decimal @db.Numeric(12, 2)
+
+  @@map("app.order_items")
+}
+
+model Payment {
+  id                 String   @id @default(uuid())
+  orderId            String?  @map("order_id")
+  provider           String?
+  providerPaymentId  String?  @map("provider_payment_id")
+  amount             Decimal? @db.Numeric(12, 2)
+  status             String?
+  paidAt             DateTime? @map("paid_at")
+
+  @@map("app.payments")
+}
+
+model Cart {
+  id        String     @id @default(uuid())
+  userId    String?    @map("user_id")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  items     CartItem[]
+
+  @@map("app.carts")
+}
+
+model CartItem {
+  id        Int    @id @default(autoincrement())
+  cartId    String @map("cart_id")
+  cart      Cart   @relation(fields: [cartId], references: [id])
+  productId String? @map("product_id")
+  quantity  Int    @default(1)
+
+  @@map("app.cart_items")
+}
+
+model Post {
+  id          String   @id @default(uuid())
+  authorId    String?  @map("author_id")
+  author      User?    @relation(fields: [authorId], references: [id])
+  title       String
+  slug        String   @unique
+  content     String?
+  excerpt     String?
+  published   Boolean  @default(false)
+  publishedAt DateTime? @map("published_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  comments    Comment[]
+
+  @@map("app.posts")
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  postId    String?  @map("post_id")
+  post      Post?    @relation(fields: [postId], references: [id])
+  userId    String?  @map("user_id")
+  user      User?    @relation(fields: [userId], references: [id])
+  content   String
+  isVisible Boolean  @default(true) @map("is_visible")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("app.comments")
+}
+
+model AuditLog {
+  id        BigInt   @id @default(autoincrement()) @map("id")
+  userId    String?  @map("user_id")
+  action    String
+  targetTable String? @map("target_table")
+  targetId  String?  @map("target_id")
+  payload   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("app.audit_logs")
+}
+
+model Attachment {
+  id          String   @id @default(uuid())
+  url         String
+  filename    String?
+  contentType String?  @map("content_type")
+  size        BigInt?
+  uploadedBy  String?  @map("uploaded_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("app.attachments")
+}
