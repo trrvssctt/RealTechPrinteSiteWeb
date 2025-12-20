@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
+import { apiFetch } from '@/lib/api';
 
 const Contact = () => {
   const [formData, setFormData] = useState({
@@ -14,20 +15,55 @@ const Contact = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Generate WhatsApp message
-    const whatsappMessage = encodeURIComponent(
-      `Nouveau message de ${formData.name}\nEmail: ${formData.email}\n\nMessage:\n${formData.message}`
-    );
-    const whatsappLink = `https://wa.me/221774220320?text=${whatsappMessage}`;
-    
-    // Open WhatsApp
-    window.open(whatsappLink, '_blank');
-    
-    // Reset form
-    setFormData({ name: '', email: '', message: '' });
-    toast.success('Message envoyé via WhatsApp');
+    (async () => {
+      try {
+        setSubmitting(true);
+        const payload = {
+          name: formData.name,
+          email: formData.email,
+          message: formData.message,
+        } as any;
+
+        const resp = await apiFetch('/api/contacts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (!resp.ok) {
+          let errText = 'Erreur lors de l\'envoi';
+          try {
+            const json = await resp.json();
+            errText = json.error || (json.errors ? json.errors.map((x:any)=>x.msg).join(', ') : errText);
+          } catch (e) {}
+          toast.error(errText);
+          return;
+        }
+
+        // success: notify user and reset
+        toast.success('Message envoyé — nous vous répondrons bientôt');
+        setFormData({ name: '', email: '', message: '' });
+
+        // Optionally open WhatsApp for immediate contact (keeps previous behaviour)
+        /*try {
+          const whatsappMessage = encodeURIComponent(
+            `Nouveau message de ${formData.name}\nEmail: ${formData.email}\n\nMessage:\n${formData.message}`
+          );
+          const whatsappLink = `https://wa.me/221774220320?text=${whatsappMessage}`;
+          window.open(whatsappLink, '_blank');
+        } catch (e) {
+          // ignore pop-up failures
+        }*/
+      } catch (err) {
+        console.error(err);
+        toast.error('Erreur réseau lors de l\'envoi');
+      } finally {
+        setSubmitting(false);
+      }
+    })();
   };
+
+  const [submitting, setSubmitting] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setFormData((prev) => ({
@@ -46,8 +82,8 @@ const Contact = () => {
     {
       icon: Mail,
       title: 'Email',
-      value: 'contact@realtech.sn',
-      link: 'mailto:contact@realtech.sn',
+      value: 'sidydiop.boss@realtechprint.com',
+      link: 'mailto:sidydiop.boss@realtechprint.com',
     },
     {
       icon: MapPin,

@@ -15,6 +15,10 @@ import Contact from "./pages/Contact";
 import NotFound from "./pages/NotFound";
 import Auth from "./pages/Auth";
 import CustomFlocage from "./pages/CustomFlocage";
+import MentionsLegales from "./pages/MentionsLegales";
+import Confidentialite from "./pages/Confidentialite";
+import ConditionsGenerales from "./pages/ConditionsGenerales";
+import Cookies from "./pages/Cookies";
 import AdminLayout from "./components/admin/AdminLayout";
 import Dashboard from "./pages/admin/Dashboard";
 import Products from "./pages/admin/Products";
@@ -22,7 +26,10 @@ import Categories from "./pages/admin/Categories";
 import Orders from "./pages/admin/Orders";
 import Testimonials from "./pages/admin/Testimonials";
 import ContactInfo from "./pages/admin/ContactInfo";
+import Contacts from "./pages/admin/Contacts";
 import AbandonedCarts from "./pages/admin/AbandonedCarts";
+import AdminUsers from "./pages/admin/Users";
+import Roles from "./pages/admin/Roles";
 import AdminLogin from "./pages/admin/AdminLogin";
 
 const queryClient = new QueryClient();
@@ -110,6 +117,46 @@ const App = () => (
               </div>
             } />
 
+            <Route path="/mentions-legales" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <MentionsLegales />
+                </main>
+                <Footer />
+              </div>
+            } />
+
+            <Route path="/confidentialite" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <Confidentialite />
+                </main>
+                <Footer />
+              </div>
+            } />
+
+            <Route path="/conditions-generales" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <ConditionsGenerales />
+                </main>
+                <Footer />
+              </div>
+            } />
+
+            <Route path="/cookies" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <Cookies />
+                </main>
+                <Footer />
+              </div>
+            } />
+
             {/* Auth route (no header/footer) */}
             <Route path="/ne_ka_connection_page" element={<Auth />} />
 
@@ -123,8 +170,11 @@ const App = () => (
               <Route path="categories" element={<Categories />} />
               <Route path="orders" element={<Orders />} />
               <Route path="carts" element={<AbandonedCarts />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route path="roles" element={<Roles />} />
               <Route path="testimonials" element={<Testimonials />} />
               <Route path="contact" element={<ContactInfo />} />
+              <Route path="messages" element={<Contacts />} />
             </Route>
 
             {/* 404 */}
