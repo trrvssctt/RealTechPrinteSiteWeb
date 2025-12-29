@@ -10,15 +10,26 @@ const createContact = async ({ name, email, subject, message, ip_address = null,
   return rows[0];
 };
 
-const listContacts = async ({ limit = 100, offset = 0, handled = null } = {}) => {
+const listContacts = async ({ limit = 100, offset = 0, handled = null, email = null } = {}) => {
   let sql = `SELECT * FROM app.contacts`;
   const params = [];
+  const where = [];
   let idx = 1;
   if (handled !== null) {
-    sql += ` WHERE is_handled = $${idx}`;
+    where.push(`is_handled = $${idx}`);
     params.push(handled);
     idx++;
   }
+  if (email) {
+    where.push(`LOWER(email) = LOWER($${idx})`);
+    params.push(email);
+    idx++;
+  }
+
+  if (where.length > 0) {
+    sql += ` WHERE ` + where.join(' AND ');
+  }
+
   sql += ` ORDER BY created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`;
   params.push(limit, offset);
   const { rows } = await db.query(sql, params);

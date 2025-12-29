@@ -756,7 +756,7 @@ const AdminUsers = () => {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => toast.info("Détails de l'utilisateur")}
+                              onClick={() => { window.location.href = `/admin/users/${user.id}` }}
                               title="Voir les détails"
                             >
                               <Eye className="h-4 w-4" />

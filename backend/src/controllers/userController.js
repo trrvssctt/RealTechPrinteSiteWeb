@@ -29,11 +29,15 @@ exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'email and password required' });
-    const result = await db.query('SELECT id, password_hash FROM app.users WHERE email = $1', [email]);
+    const result = await db.query('SELECT id, password_hash, is_active FROM app.users WHERE email = $1', [email]);
     if (!result.rows.length) return res.status(401).json({ error: 'invalid credentials' });
     const user = result.rows[0];
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) return res.status(401).json({ error: 'invalid credentials' });
+    // Check if account is active
+    if (user.is_active === false) {
+      return res.status(403).json({ error: 'Compte désactivé. Vous n\'êtes pas autorisé à vous connecter.' });
+    }
     // create session token (stored as id in app.sessions)
     const token = uuidv4();
     await db.query('INSERT INTO app.sessions (id, user_id) VALUES ($1, $2)', [token, user.id]);

@@ -142,7 +142,8 @@ const list = async (req, res, next) => {
     const limit = Math.min(parseInt(req.query.limit || '100', 10), 1000);
     const offset = parseInt(req.query.offset || '0', 10);
     const handled = req.query.handled === undefined ? null : req.query.handled === 'true';
-    const rows = await contactModel.listContacts({ limit, offset, handled });
+    const email = req.query.email || null;
+    const rows = await contactModel.listContacts({ limit, offset, handled, email });
     res.json({ ok: true, results: rows });
   } catch (err) {
     next(err);

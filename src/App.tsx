@@ -31,6 +31,11 @@ import AbandonedCarts from "./pages/admin/AbandonedCarts";
 import AdminUsers from "./pages/admin/Users";
 import Roles from "./pages/admin/Roles";
 import AdminLogin from "./pages/admin/AdminLogin";
+import Clients from "./pages/admin/Clients";
+import UserDetail from "./pages/admin/UserDetail";
+import ClientDetail from "./pages/admin/ClientDetail";
+import Stock from "./pages/admin/Stock";
+import Reports from "./pages/admin/Reports";
 
 const queryClient = new QueryClient();
 
@@ -158,20 +163,25 @@ const App = () => (
             } />
 
             {/* Auth route (no header/footer) */}
-            <Route path="/ne_ka_connection_page" element={<Auth />} />
+            <Route path="/ne_ka_connection_page" element={<AdminLogin />} />
 
             {/* Admin login (public) */}
-            <Route path="/admin/login" element={<AdminLogin />} />
+            <Route path="/admin/sama_page_de_connection" element={<AdminLogin />} />
 
             {/* Admin routes */}
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<Dashboard />} />
               <Route path="products" element={<Products />} />
+              <Route path="stock" element={<Stock />} />
               <Route path="categories" element={<Categories />} />
               <Route path="orders" element={<Orders />} />
               <Route path="carts" element={<AbandonedCarts />} />
+              <Route path="clients" element={<Clients />} />
+              <Route path="clients/:id" element={<ClientDetail />} />
               <Route path="users" element={<AdminUsers />} />
+              <Route path="users/:id" element={<UserDetail />} />
               <Route path="roles" element={<Roles />} />
+              <Route path="rapports" element={<Reports />} />
               <Route path="testimonials" element={<Testimonials />} />
               <Route path="contact" element={<ContactInfo />} />
               <Route path="messages" element={<Contacts />} />

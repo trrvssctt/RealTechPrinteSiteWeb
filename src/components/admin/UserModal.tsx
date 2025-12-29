@@ -20,12 +20,13 @@ const UserModal = ({ open, onOpenChange, user, onSaved }: any) => {
       setEmail(user.email || '');
       setPhone(user.phone || '');
       setPassword('');
-      setRoleId(user.role_id || null);
+      setRoleId(user.role_id || user.role || null);
     } else {
       setName(''); setEmail(''); setPhone(''); setRoleId(null);
     }
     fetchRoles();
   }, [user]);
+  const [saving, setSaving] = useState(false);
 
   const fetchRoles = async () => {
     try {
@@ -44,26 +45,29 @@ const UserModal = ({ open, onOpenChange, user, onSaved }: any) => {
   const handleSave = async () => {
     if (!name || !email) return toast.error('Nom et email requis');
     try {
+      setSaving(true);
       const token = localStorage.getItem('sessionToken');
       const headers: any = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      if (user && user.id) {
-        // include password only if provided when updating
-        const payload: any = { name, email, phone, role_id: roleId };
-        if (password && password.trim() !== '') payload.password = password;
-        const resp = await apiFetch(`/api/admin/users/${user.id}`, { method: 'PUT', headers, body: JSON.stringify(payload) });
-        if (!resp.ok) throw new Error('update failed');
-        toast.success('Utilisateur mis à jour');
+        if (user && user.id) {
+          // include password only if provided when updating
+          const payload: any = { name, email, phone, role_id: roleId };
+          if (password && password.trim() !== '') payload.password = password;
+          const resp = await apiFetch(`/api/admin/users/${user.id}`, { method: 'PUT', headers, body: JSON.stringify(payload) });
+          if (!resp.ok) throw new Error('update failed');
       } else {
-        const resp = await apiFetch('/api/admin/users', { method: 'POST', headers, body: JSON.stringify({ name, email, phone, role_id: roleId, password: password || 'changeme' }) });
-        if (!resp.ok) throw new Error('create failed');
-        toast.success('Utilisateur créé');
+          const resp = await apiFetch('/api/admin/users', { method: 'POST', headers, body: JSON.stringify({ name, email, phone, role_id: roleId, password: password || 'changeme' }) });
+          if (!resp.ok) throw new Error('create failed');
       }
       onSaved?.();
+      onOpenChange?.(false);
     } catch (err) {
       console.error(err);
       toast.error('Erreur lors de l\'enregistrement');
+    }
+    finally {
+      setSaving(false);
     }
   };
 
@@ -106,8 +110,8 @@ const UserModal = ({ open, onOpenChange, user, onSaved }: any) => {
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Annuler</Button>
-          <Button onClick={handleSave}>{user ? 'Sauvegarder' : 'Créer'}</Button>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>Annuler</Button>
+          <Button onClick={handleSave} disabled={saving}>{saving ? 'Enregistrement...' : (user ? 'Sauvegarder' : 'Créer')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

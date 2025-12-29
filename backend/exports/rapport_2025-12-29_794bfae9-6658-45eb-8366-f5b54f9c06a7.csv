@@ -1,0 +1,6 @@
+id,product,type,subtype,quantity,reference,date,status,created_by
+"e0911d45-402e-4384-aa38-c7cc4452bf46","DTF 60 cm Audley XP600","out","commande","1","","Fri Dec 26 2025 14:39:18 GMT+0000 (heure moyenne de Greenwich)","active","Admin User"
+"9427577a-9d67-4270-b349-d4ef86ec7c6c","Encre DTF","out","commande","1","","Fri Dec 26 2025 14:39:18 GMT+0000 (heure moyenne de Greenwich)","active","Admin User"
+"1a5eb5b1-8092-42e6-b472-4009276a8839","Presse T-Shirts 38X38","out","commande","1","","Fri Dec 26 2025 14:39:18 GMT+0000 (heure moyenne de Greenwich)","active","Admin User"
+"9b3ded07-a970-4956-9f44-e78758cc89c7","Poudre DTF","out","commande","1","","Fri Dec 26 2025 14:39:18 GMT+0000 (heure moyenne de Greenwich)","active","Admin User"
+"f8aa7246-2c23-4139-9096-c6028838ddcd","Film DTF 30 cm","in","reaprovisonnement","5","","Fri Dec 26 2025 14:12:50 GMT+0000 (heure moyenne de Greenwich)","active","Admin User"

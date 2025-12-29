@@ -50,7 +50,13 @@ async function updateUser(id, { name, full_name, email, phone, role_id, is_activ
 }
 
 async function deleteUser(id) {
-  await pool.query(`DELETE FROM app.users WHERE id = $1`, [id]);
+  // Instead of hard-deleting the user (which can break foreign key constraints
+  // like audit logs), mark the user as inactive. Return the updated user.
+  const res = await pool.query(
+    `UPDATE app.users SET is_active = false, updated_at = now() WHERE id = $1 RETURNING *`,
+    [id]
+  );
+  return mapUserRow(res.rows[0]);
 }
 
 async function logUserAction(user_id, action, metadata = {}) {

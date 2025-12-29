@@ -153,14 +153,8 @@ const Dashboard = () => {
         return d >= previousStart && d < previousEnd;
       });
 
-      // Only count revenue from orders that are completed
-      const revenue = ordersInRange
-        .filter((order: any) => order.status === 'completed')
-        .reduce((sum: number, order: any) => sum + Number(order.total_amount || 0), 0);
-
-      const previousRevenue = ordersPrevious
-        .filter((order: any) => order.status === 'completed')
-        .reduce((sum: number, order: any) => sum + Number(order.total_amount || 0), 0);
+      const revenue = ordersInRange.reduce((sum: number, order: any) => sum + Number(order.total_amount || 0), 0);
+      const previousRevenue = ordersPrevious.reduce((sum: number, order: any) => sum + Number(order.total_amount || 0), 0);
 
       // Paniers: considérer last_activity_at si disponible, sinon updated_at
       const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);

@@ -14,7 +14,8 @@ import {
   Loader2,
   Home,
   Bell,
-  Settings
+  Settings,
+  ChartAreaIcon
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +30,7 @@ const AdminLayout = () => {
     try {
       localStorage.removeItem('sessionToken');
       toast.success("Déconnexion réussie");
-      window.location.href = '/admin/login';
+      window.location.href = '/admin/sama_page_de_connection';
     } catch (err) {
       console.error('Logout error', err);
       toast.error('Erreur lors de la déconnexion');
@@ -54,12 +55,15 @@ const AdminLayout = () => {
   const navItems = [
     { path: "/admin", icon: LayoutDashboard, label: "Tableau de bord", badge: null },
     { path: "/admin/products", icon: Package, label: "Produits", badge: null },
+    { path: "/admin/stock", icon: Package, label: "Stock", badge: null },
     { path: "/admin/users", icon: Users, label: "Utilisateurs", badge: null },
+    { path: "/admin/clients", icon: Users, label: "Clients", badge: null },
     { path: "/admin/categories", icon: FolderTree, label: "Catégories", badge: null },
     { path: "/admin/orders", icon: ShoppingCart, label: "Commandes", badge: "pending" },
     { path: "/admin/carts", icon: ShoppingCart, label: "Paniers", badge: null },
     { path: "/admin/messages", icon: MessageSquare, label: "Messages", badge: "unread" },
     { path: "/admin/testimonials", icon: MessageSquare, label: "Témoignages", badge: null },
+    { path: "/admin/rapports", icon: ChartAreaIcon, label: "Rapports", badge: null },
     { path: "/admin/contact", icon: Phone, label: "Contacts", badge: null },
   ];
 
