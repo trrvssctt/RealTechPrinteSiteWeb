@@ -45,11 +45,14 @@ exports.createOrder = async (req, res, next) => {
       }
     }
 
-    const q = `INSERT INTO app.orders (id, user_id, client_id, status, total_amount, placed_at, shipping_address, billing_address, metadata)
-               VALUES ($1,$2,$3,$4,$5,now(),$6,$7,$8) RETURNING *`;
+        // include created_by column if present in schema (we pass userId as both user_id and created_by)
+        const q = `INSERT INTO app.orders (id, user_id, created_by, client_id, status, total_amount, placed_at, shipping_address, billing_address, metadata)
+          VALUES ($1,$2,$3,$4,$5,$6,now(),$7,$8,$9) RETURNING *`;
     const status = 'pending';
     const clientId = client ? client.id : null;
-    const { rows } = await db.query(q, [orderId, null, clientId, status, total_amount || 0, shipping_address || null, billing_address || null, metadata || null]);
+    const userId = (req.user && req.user.id) || null;
+    const createdBy = userId || null;
+    const { rows } = await db.query(q, [orderId, userId, createdBy, clientId, status, total_amount || 0, shipping_address || null, billing_address || null, metadata || null]);
 
     // verify stock for each item and insert order_items
     for (const it of items) {
@@ -63,10 +66,24 @@ exports.createOrder = async (req, res, next) => {
         }
       }
 
+      // Support both product items and service items in order_items
+      const unitPrice = Number(it.unit_price || it.price || 0);
+      const quantity = Number(it.quantity || 1);
+      const total = unitPrice * quantity;
+
       await db.query(
-        `INSERT INTO app.order_items (order_id, product_id, product_name, unit_price, quantity, total)
-         VALUES ($1,$2,$3,$4,$5,$6)`,
-        [orderId, it.product_id || null, it.product_name || it.name || null, it.unit_price || it.price || 0, it.quantity || 1, (it.unit_price || it.price || 0) * (it.quantity || 1)]
+        `INSERT INTO app.order_items (order_id, product_id, service_id, product_name, service_name, unit_price, quantity, total)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          orderId,
+          it.product_id || null,
+          it.service_id || null,
+          it.product_name || it.name || null,
+          it.service_name || it.name || null,
+          unitPrice,
+          quantity,
+          total
+        ]
       );
     }
 
@@ -75,6 +92,25 @@ exports.createOrder = async (req, res, next) => {
       `UPDATE app.orders SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), $1, $2::jsonb, true) WHERE id = $3`,
       ['{customer}', JSON.stringify({ name: customer_name || null, phone: customer_phone || null, email: customer_email || null }), orderId]
     );
+
+    // initialize traiter_par in metadata with creator info
+    try {
+      const creator = {
+        user_id: userId || null,
+        name: (req.user && (req.user.name || req.user.email)) || null,
+        roles: (req.user && req.user.roles) || null,
+        action: 'created',
+        first_at: new Date().toISOString(),
+        last_at: new Date().toISOString(),
+        count: 1
+      };
+      await db.query(
+        `UPDATE app.orders SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), $1, $2::jsonb, true) WHERE id = $3`,
+        ['{traiter_par}', JSON.stringify([creator]), orderId]
+      );
+    } catch (e) {
+      console.error('Failed to initialize traiter_par', e);
+    }
 
     await db.query('COMMIT');
 
@@ -205,6 +241,30 @@ exports.updateOrder = async (req, res, next) => {
     // Generic status update for other transitions
     if (status && status !== 'completed' && status !== 'cancelled') {
       await db.query('UPDATE app.orders SET status = $1 WHERE id = $2', [status, id]);
+    }
+
+    // Append the actor into metadata.traiter_par (jsonb array) so every update records who acted
+    try {
+      const actor = {
+        user_id: (req.user && req.user.id) || null,
+        name: (req.user && (req.user.name || req.user.email)) || null,
+        roles: (req.user && req.user.roles) || null,
+        action: status || 'update',
+        at: new Date().toISOString()
+      };
+
+      // Use jsonb operations to append the actor object to the traiter_par array (create if missing)
+      await db.query(
+        `UPDATE app.orders SET metadata = jsonb_set(
+           COALESCE(metadata, '{}'::jsonb),
+           '{traiter_par}',
+           COALESCE(metadata->'traiter_par','[]'::jsonb) || jsonb_build_array($1::jsonb),
+           true
+         ) WHERE id = $2`,
+        [JSON.stringify(actor), id]
+      );
+    } catch (e) {
+      console.error('Failed to record traiter_par metadata', e);
     }
 
     // return enriched order with items

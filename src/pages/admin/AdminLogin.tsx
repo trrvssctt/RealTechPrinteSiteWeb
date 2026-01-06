@@ -65,13 +65,29 @@ const AdminLogin = () => {
       if (!meResp.ok) throw new Error("Impossible de vérifier les droits");
 
       const meData = await meResp.json();
-      const roles = meData.user?.roles || [];
+      const rawRoles = meData.user?.roles || [];
+      const roles: string[] = Array.isArray(rawRoles)
+        ? rawRoles
+            .map((r: any) => {
+              if (!r) return "";
+              if (typeof r === "string") return r.toLowerCase();
+              if (typeof r === "object") return (r.name || r.role || r.title || "").toString().toLowerCase();
+              return "";
+            })
+            .filter(Boolean)
+        : [];
 
       if (roles.includes("admin")) {
         toast.success("✅ Connexion réussie", {
           description: "Accès au tableau de bord autorisé"
         });
         setTimeout(() => navigate("/admin"), 800);
+      } else if (roles.includes("employe") || roles.includes("employé") || roles.includes("employee") || roles.includes("staff")) {
+        // Keep token for employee sessions and redirect to the employee dashboard
+        toast.success("✅ Connexion réussie", {
+          description: "Accès employé autorisé"
+        });
+        setTimeout(() => navigate("/admin/employe"), 800);
       } else {
         localStorage.removeItem("sessionToken");
         toast.error("❌ Accès refusé", {

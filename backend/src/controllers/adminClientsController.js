@@ -16,6 +16,21 @@ const getClient = async (req, res, next) => {
     const { id } = req.params;
     const client = await clientModel.getClientById(id);
     if (!client) return res.status(404).json({ error: 'client not found' });
+    // enrich client with creator/updater info if available
+    try {
+      if (client.created_by_user) {
+        const { rows } = await db.query(`SELECT id, full_name AS name, email FROM app.users WHERE id = $1 LIMIT 1`, [client.created_by_user]);
+        client.created_by_user_info = rows[0] || null;
+      }
+      if (client.updated_by_user) {
+        const { rows } = await db.query(`SELECT id, full_name AS name, email FROM app.users WHERE id = $1 LIMIT 1`, [client.updated_by_user]);
+        client.updated_by_user_info = rows[0] || null;
+      }
+    } catch (err) {
+      // non blocking: if lookup fails, continue without info
+      console.error('could not fetch creator/updater info', err);
+    }
+
     res.json({ data: client });
   } catch (err) {
     next(err);
@@ -33,7 +48,8 @@ const createClient = async (req, res, next) => {
       const existingByPhone = await clientModel.getClientByPhone(phone);
       if (existingByPhone) return res.status(409).json({ error: 'phone already exists' });
     }
-    const client = await clientModel.createClient({ full_name, email, phone, created_by_channel, metadata });
+    const created_by_user = req.user?.id || null;
+    const client = await clientModel.createClient({ full_name, email, phone, created_by_channel, metadata, created_by_user });
     // log action if needed
     res.status(201).json({ client });
   } catch (err) {
@@ -44,7 +60,9 @@ const createClient = async (req, res, next) => {
 const updateClient = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const payload = req.body;
+    const payload = req.body || {};
+    // attach updater id when available
+    payload.updated_by_user = req.user?.id || null;
     const client = await clientModel.updateClient(id, payload);
     res.json({ client });
   } catch (err) {

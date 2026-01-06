@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
-import { useAdmin } from '@/hooks/useAdmin';
+// do not use useAdmin here (it redirects non-admins); fetch current user locally
 import { DatePickerWithRange } from '@/components/ui/date-range-picker';
 
 const StockImproved = () => {
@@ -41,12 +41,30 @@ const StockImproved = () => {
   const [createNote, setCreateNote] = useState('');
   const [creating, setCreating] = useState(false);
 
-  const { user } = useAdmin();
+  const [user, setUser] = useState<any>(null);
+  const [isEmployee, setIsEmployee] = useState(false);
 
   // Fetch data on component mount
   useEffect(() => {
     fetchProducts();
     fetchMovements();
+
+    // detect if current user is an employee (allow view but no write)
+    (async () => {
+      try {
+        const resp = await apiFetch('/api/users/me');
+        if (!resp.ok) return;
+        const j = await resp.json().catch(() => ({}));
+        const u = j.user || j.data || j;
+        setUser(u);
+        const roles = u?.roles || u?.role_names || u?.role || [];
+        const roleList = Array.isArray(roles) ? roles : (typeof roles === 'string' ? [roles] : []);
+        const isEmp = roleList.some(r => typeof r === 'string' && ['employe','employé','employee','staff'].includes(r.toLowerCase()));
+        setIsEmployee(Boolean(isEmp));
+      } catch (err) {
+        // ignore
+      }
+    })();
   }, []);
 
   // Fetch movements when filters change
@@ -194,6 +212,10 @@ const StockImproved = () => {
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D', '#FFC658', '#8DD1E1'];
 
   const createMovement = async () => {
+    if (isEmployee) {
+      toast.error('Permission refusée');
+      return;
+    }
     if (!createProduct) {
       toast.error('Sélectionnez un produit');
       return;
@@ -280,14 +302,21 @@ const StockImproved = () => {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={exportToCSV} className="gap-2">
-            <Download size={16} />
-            Exporter
-          </Button>
-          <Button onClick={() => setOpenCreate(true)} className="gap-2 bg-blue-600 hover:bg-blue-700">
-            <Plus size={16} />
-            Nouvelle Entrée
-          </Button>
+          {!isEmployee && (
+            <Button variant="outline" onClick={exportToCSV} className="gap-2">
+              <Download size={16} />
+              Exporter
+            </Button>
+          )}
+          {!isEmployee && (
+            <Button onClick={() => setOpenCreate(true)} className="gap-2 bg-blue-600 hover:bg-blue-700">
+              <Plus size={16} />
+              Nouvelle Entrée
+            </Button>
+          )}
+          {isEmployee && (
+            <div className="text-sm text-gray-600 self-center">Accès lecture seule</div>
+          )}
         </div>
       </div>
 

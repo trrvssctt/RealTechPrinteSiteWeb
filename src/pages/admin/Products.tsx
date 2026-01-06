@@ -71,6 +71,7 @@ const Products = () => {
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [loading, setLoading] = useState(true);
   const [bulkSelected, setBulkSelected] = useState<string[]>([]);
+  const [isEmployee, setIsEmployee] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortBy, setSortBy] = useState<string>("created_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
@@ -92,6 +93,32 @@ const Products = () => {
   useEffect(() => {
     fetchProducts();
     fetchCategories();
+    // detect if current user is an employee to restrict actions
+    const detectRole = async () => {
+      try {
+        const token = localStorage.getItem('sessionToken');
+        if (!token) return;
+        const resp = await apiFetch('/api/users/me', { headers: { Authorization: `Bearer ${token}` } });
+        if (!resp.ok) return;
+        const json = await resp.json();
+        const rawRoles = json.user?.roles || json.roles || [];
+        const roles: string[] = Array.isArray(rawRoles)
+          ? rawRoles
+              .map((r: any) => {
+                if (!r) return '';
+                if (typeof r === 'string') return r.toLowerCase();
+                if (typeof r === 'object') return (r.name || r.role || r.title || '').toString().toLowerCase();
+                return '';
+              })
+              .filter(Boolean)
+          : [];
+        const employeeRoles = ['employe', 'employé', 'employee', 'staff', 'assistant', 'agent'];
+        if (roles.some((role) => employeeRoles.includes(role))) setIsEmployee(true);
+      } catch (e) {
+        // ignore
+      }
+    };
+    detectRole();
   }, []);
 
   useEffect(() => {
@@ -471,10 +498,12 @@ const Products = () => {
             <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             Actualiser
           </Button>
-          <Button onClick={() => { setEditingProduct(null); setOpen(true); }}>
-            <Plus className="mr-2 h-4 w-4" />
-            Nouveau produit
-          </Button>
+          {!isEmployee && (
+            <Button onClick={() => { setEditingProduct(null); setOpen(true); }}>
+              <Plus className="mr-2 h-4 w-4" />
+              Nouveau produit
+            </Button>
+          )}
         </div>
       </div>
 
@@ -497,6 +526,7 @@ const Products = () => {
           </CardContent>
         </Card>
         
+        {!isEmployee && (
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -513,6 +543,7 @@ const Products = () => {
             </div>
           </CardContent>
         </Card>
+        )}
         
         <Card>
           <CardContent className="pt-6">
@@ -700,7 +731,7 @@ const Products = () => {
       </Card>
 
       {/* Bulk Actions */}
-      {bulkSelected.length > 0 && (
+      {bulkSelected.length > 0 && !isEmployee && (
         <Card className="bg-muted border">
           <CardContent className="pt-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -761,29 +792,33 @@ const Products = () => {
         </div>
         
         <div className="flex items-center gap-2">
-          <input
-            type="file"
-            accept=".csv"
-            onChange={handleImport}
-            className="hidden"
-            id="csv-import"
-          />
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={() => document.getElementById('csv-import')?.click()}
-          >
-            <Upload className="mr-2 h-4 w-4" />
-            Importer CSV
-          </Button>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={handleExport}
-          >
-            <Download className="mr-2 h-4 w-4" />
-            Exporter CSV
-          </Button>
+          {!isEmployee && (
+            <>
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handleImport}
+                className="hidden"
+                id="csv-import"
+              />
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => document.getElementById('csv-import')?.click()}
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                Importer CSV
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleExport}
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Exporter CSV
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -820,10 +855,12 @@ const Products = () => {
                 }
               </p>
               {!searchTerm && filterCategory === "all" && filterStock === "all" && (
-                <Button onClick={() => { setEditingProduct(null); setOpen(true); }}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Créer un produit
-                </Button>
+                !isEmployee && (
+                  <Button onClick={() => { setEditingProduct(null); setOpen(true); }}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Créer un produit
+                  </Button>
+                )
               )}
             </div>
           ) : (
@@ -832,16 +869,20 @@ const Products = () => {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-12">
-                        <div className="flex items-center">
-                          <input
-                            type="checkbox"
-                            checked={currentProducts.length > 0 && bulkSelected.length === currentProducts.length}
-                            onChange={toggleSelectAll}
-                            className="rounded"
-                          />
-                        </div>
-                      </TableHead>
+                      {!isEmployee ? (
+                        <TableHead className="w-12">
+                          <div className="flex items-center">
+                            <input
+                              type="checkbox"
+                              checked={currentProducts.length > 0 && bulkSelected.length === currentProducts.length}
+                              onChange={toggleSelectAll}
+                              className="rounded"
+                            />
+                          </div>
+                        </TableHead>
+                      ) : (
+                        <TableHead className="w-12">&nbsp;</TableHead>
+                      )}
                       {visibleColumns.image && <TableHead className="w-16">Image</TableHead>}
                       {visibleColumns.sku && <TableHead>SKU</TableHead>}
                       <TableHead>Nom</TableHead>
@@ -864,12 +905,16 @@ const Products = () => {
                         <TableRow key={product.id} className="hover:bg-muted/50">
                           <TableCell>
                             <div className="flex items-center">
-                              <input
-                                type="checkbox"
-                                checked={bulkSelected.includes(product.id)}
-                                onChange={() => toggleBulkSelect(product.id)}
-                                className="rounded"
-                              />
+                              {!isEmployee ? (
+                                <input
+                                  type="checkbox"
+                                  checked={bulkSelected.includes(product.id)}
+                                  onChange={() => toggleBulkSelect(product.id)}
+                                  className="rounded"
+                                />
+                              ) : (
+                                <span className="text-sm text-muted-foreground">&nbsp;</span>
+                              )}
                             </div>
                           </TableCell>
                           
@@ -966,48 +1011,54 @@ const Products = () => {
                             </TableCell>
                           )}
 
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleEdit(product)}
-                                title="Modifier"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="sm">
-                                    <MoreVertical className="h-4 w-4" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => handleEdit(product)}>
-                                    <Pencil className="mr-2 h-4 w-4" />
-                                    Modifier
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleDuplicate(product)}>
-                                    <Copy className="mr-2 h-4 w-4" />
-                                    Dupliquer
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => window.open(`/produit/${product.id}`, '_blank')}>
-                                    <Eye className="mr-2 h-4 w-4" />
-                                    Voir sur le site
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem 
-                                    onClick={() => handleDelete(product.id)}
-                                    className="text-destructive"
-                                  >
-                                    <Trash2 className="mr-2 h-4 w-4" />
-                                    Supprimer
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </div>
-                          </TableCell>
+                          {!isEmployee ? (
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleEdit(product)}
+                                  title="Modifier"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="sm">
+                                      <MoreVertical className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                    <DropdownMenuItem onClick={() => handleEdit(product)}>
+                                      <Pencil className="mr-2 h-4 w-4" />
+                                      Modifier
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleDuplicate(product)}>
+                                      <Copy className="mr-2 h-4 w-4" />
+                                      Dupliquer
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => window.open(`/produit/${product.id}`, '_blank')}>
+                                      <Eye className="mr-2 h-4 w-4" />
+                                      Voir sur le site
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem 
+                                      onClick={() => handleDelete(product.id)}
+                                      className="text-destructive"
+                                    >
+                                      <Trash2 className="mr-2 h-4 w-4" />
+                                      Supprimer
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            </TableCell>
+                          ) : (
+                            <TableCell className="text-right">
+                              <span className="text-sm text-muted-foreground">—</span>
+                            </TableCell>
+                          )}
                         </TableRow>
                       );
                     })}

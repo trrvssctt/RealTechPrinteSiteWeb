@@ -19,6 +19,7 @@ const adminClientsRouter = require('./routes/adminClients');
 const clientsRouter = require('./routes/clients');
 const adminStockMovementsRouter = require('./routes/adminStockMovements');
 const adminRapportsRouter = require('./routes/adminRapports');
+const adminServicesRouter = require('./routes/adminServices');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -98,6 +99,7 @@ app.use('/api/admin/clients', adminClientsRouter);
 app.use('/api/clients', clientsRouter);
 app.use('/api/admin/stock-mouvements', adminStockMovementsRouter);
 app.use('/api/admin/rapports', adminRapportsRouter);
+app.use('/api/admin/services', adminServicesRouter);
 
 app.use((err, req, res, next) => {
   console.error(err);

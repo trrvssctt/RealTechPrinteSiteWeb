@@ -20,6 +20,10 @@ const createUser = async (req, res, next) => {
     if (existing) return res.status(409).json({ error: 'email already exists' });
     const hash = password ? await bcrypt.hash(password, 10) : null;
     const user = await userModel.createUser({ name, email, phone, password_hash: hash, role_id });
+    // if a role_id was provided, also ensure mapping in user_roles
+    if (role_id) {
+      await userModel.assignRole(user.id, role_id);
+    }
     // log action
     await userModel.logUserAction(req.user?.id || null, 'create_user', { user_id: user.id, email: user.email });
     res.status(201).json({ user });
@@ -33,6 +37,10 @@ const updateUser = async (req, res, next) => {
     const { id } = req.params;
     const { name, email, phone, role_id, is_active } = req.body;
     const user = await userModel.updateUser(id, { name, email, phone, role_id, is_active });
+    // if role_id provided, update the user_roles mapping as well
+    if (typeof role_id !== 'undefined' && role_id !== null) {
+      await userModel.setUserRole(id, role_id);
+    }
     await userModel.logUserAction(req.user?.id || null, 'update_user', { user_id: id });
     res.json({ user });
   } catch (err) {

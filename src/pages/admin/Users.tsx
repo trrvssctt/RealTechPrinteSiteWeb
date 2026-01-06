@@ -99,11 +99,13 @@ const AdminUsers = () => {
   });
   const [modalOpen, setModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
+  const [roles, setRoles] = useState<any[]>([]);
 
   const ITEMS_PER_PAGE = 15;
 
   useEffect(() => {
     fetchUsers();
+    fetchRoles();
   }, []);
 
   useEffect(() => {
@@ -134,6 +136,62 @@ const AdminUsers = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchRoles = async () => {
+    try {
+      const token = localStorage.getItem('sessionToken');
+      const headers: any = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const resp = await apiFetch('/api/admin/roles', { headers });
+      if (!resp.ok) return setRoles([]);
+      const payload = await resp.json();
+      setRoles(payload.data || []);
+    } catch (err) {
+      setRoles([]);
+    }
+  };
+
+  const ensureRoleByName = async (roleName: string) => {
+    if (!roleName) return null;
+    const lower = roleName.toLowerCase();
+    let found = roles.find(r => (r.name || '').toString().toLowerCase() === lower);
+    if (found) return found.id;
+
+    // try common french variant
+    found = roles.find(r => (r.name || '').toString().toLowerCase() === (roleName === 'employee' ? 'employe' : roleName));
+    if (found) return found.id;
+
+    // create role if not found
+    try {
+      const token = localStorage.getItem('sessionToken');
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const resp = await apiFetch('/api/admin/roles', { method: 'POST', headers, body: JSON.stringify({ name: roleName }) });
+      if (!resp.ok) return null;
+      const payload = await resp.json();
+      await fetchRoles();
+      return payload.role?.id || null;
+    } catch (err) {
+      return null;
+    }
+  };
+
+  const handleSetRoleToEmployee = async (userId: string) => {
+    try {
+      const roleId = await ensureRoleByName('employee');
+      if (!roleId) return toast.error("Impossible de trouver/créer le rôle 'employee'");
+      const token = localStorage.getItem('sessionToken');
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const resp = await apiFetch(`/api/admin/users/${userId}`, { method: 'PUT', headers, body: JSON.stringify({ role_id: roleId }) });
+      if (!resp.ok) throw new Error('update failed');
+      toast.success('Rôle modifié en employé');
+      fetchUsers();
+    } catch (err) {
+      console.error(err);
+      toast.error('Erreur lors du changement de rôle');
     }
   };
 
@@ -360,6 +418,9 @@ const AdminUsers = () => {
         return 'bg-red-100 text-red-800 border-red-200';
       case 'moderator':
         return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'employee':
+      case 'employe':
+        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
       case 'staff':
         return 'bg-purple-100 text-purple-800 border-purple-200';
       case 'customer':
@@ -375,6 +436,9 @@ const AdminUsers = () => {
         return <Shield className="h-3 w-3" />;
       case 'moderator':
         return <Users className="h-3 w-3" />;
+      case 'employee':
+      case 'employe':
+        return <User className="h-3 w-3" />;
       default:
         return <User className="h-3 w-3" />;
     }
@@ -717,10 +781,11 @@ const AdminUsers = () => {
                             variant="outline" 
                             className={`${getRoleColor(user.role)} gap-1`}
                           >
-                            {getRoleIcon(user.role)}
-                            {user.role === 'admin' ? 'Administrateur' : 
-                             user.role === 'moderator' ? 'Modérateur' : 
-                             user.role === 'staff' ? 'Staff' : 'Client'}
+                             {getRoleIcon(user.role)}
+                             {user.role === 'admin' ? 'Administrateur' : 
+                              user.role === 'moderator' ? 'Modérateur' : 
+                              (user.role === 'employee' || user.role === 'employe') ? 'Employé' : 
+                              user.role === 'staff' ? 'Staff' : 'Client'}
                           </Badge>
                         </TableCell>
                         
@@ -780,6 +845,10 @@ const AdminUsers = () => {
                                 <DropdownMenuItem onClick={() => toast.info("Modifier l'utilisateur")}>
                                   <Pencil className="mr-2 h-4 w-4" />
                                   Modifier
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleSetRoleToEmployee(user.id)}>
+                                  <Users className="mr-2 h-4 w-4" />
+                                  Définir comme employé
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => handleToggleStatus(user.id, user.is_active)}>
                                   {user.is_active ? (

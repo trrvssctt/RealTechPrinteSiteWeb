@@ -39,6 +39,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { apiFetch } from '@/lib/api';
+import { useUser } from '@/hooks/useUser';
 import { 
   Eye, 
   Download, 
@@ -76,7 +77,7 @@ import {
 
 import { format, parseISO } from "date-fns";
 import { useAdmin } from '@/hooks/useAdmin';
-import logo_realtech from '../../../assets/logo_realtech.png';
+import logo_realtech from '/assets/logo_realtech.png';
 import { fr } from "date-fns/locale";
 import {
   DropdownMenu,
@@ -113,6 +114,10 @@ const Orders = () => {
   const [orderClient, setOrderClient] = useState<any>(null);
   const [productSearch, setProductSearch] = useState('');
   const [clientSearch, setClientSearch] = useState('');
+  const [availableServices, setAvailableServices] = useState<any[]>([]);
+  const [serviceSearch, setServiceSearch] = useState('');
+  const [filteredServices, setFilteredServices] = useState<any[]>([]);
+  const [showServices, setShowServices] = useState<boolean>(false);
   const [savingOrder, setSavingOrder] = useState(false);
   const [discount, setDiscount] = useState<number>(0);
   const [paymentMethod, setPaymentMethod] = useState<string>('card');
@@ -120,7 +125,13 @@ const Orders = () => {
 
   const [orderNotes, setOrderNotes] = useState<string>('');
   const navigate = useNavigate();
-  const { user: currentUser } = useAdmin();
+  const { user: currentUser } = useUser();
+
+  const isEmployee = (() => {
+    const raw = currentUser?.roles || [];
+    const roles: string[] = Array.isArray(raw) ? raw.map((r:any) => (r||'').toString().toLowerCase()) : [];
+    return roles.includes('employee') || roles.includes('employe') || roles.includes('employé') || roles.includes('staff');
+  })();
   const [orderClientRecord, setOrderClientRecord] = useState<any>(null);
   // Cancel modal state
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -496,6 +507,18 @@ const Orders = () => {
     }
   };
 
+  const fetchServices = async () => {
+    try {
+      const token = localStorage.getItem('sessionToken');
+      const resp = await apiFetch('/api/admin/services?limit=1000', { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (!resp.ok) return;
+      const payload = await resp.json().catch(() => ({}));
+      setAvailableServices(payload.data || payload || []);
+    } catch (err) {
+      console.error('Failed to load services', err);
+    }
+  };
+
   const fetchCategories = async () => {
     try {
       const resp = await apiFetch('/api/categories');
@@ -519,6 +542,16 @@ const Orders = () => {
     }
     setFilteredProducts(list);
   }, [availableProducts, productSearch, productCategoryFilter]);
+
+  // recompute filteredServices when services or search changes
+  useEffect(() => {
+    let list = availableServices || [];
+    if (serviceSearch && serviceSearch.trim() !== '') {
+      const q = serviceSearch.toLowerCase();
+      list = list.filter(s => (s.name || '').toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q));
+    }
+    setFilteredServices(list);
+  }, [availableServices, serviceSearch]);
 
   const fetchClientsForPicker = async () => {
     try {
@@ -549,6 +582,7 @@ const Orders = () => {
     fetchProducts();
     fetchClientsForPicker();
     fetchCategories();
+    fetchServices();
   };
 
   const addProductToOrder = (p: any) => {
@@ -563,25 +597,46 @@ const Orders = () => {
     setNewOrderItemsLocal([...newOrderItemsLocal, { product_id: p.id, product_name: p.name, unit_price: Number(p.price || 0), quantity: 1, stock: Number(p.stock || 0) }]);
   };
 
-  const updateItemQuantity = (productId: string, qty: number) => {
-    setNewOrderItemsLocal(prev => prev.map(i => i.product_id === productId ? { ...i, quantity: Math.max(1, Math.min(i.stock || 0, qty)) } : i));
+  const addServiceToOrder = (s: any) => {
+    const existing = newOrderItemsLocal.find(i => i.service_id === s.id);
+    if (existing) {
+      existing.quantity = (existing.quantity || 0) + 1;
+      setNewOrderItemsLocal([...newOrderItemsLocal]);
+      return;
+    }
+    setNewOrderItemsLocal([...newOrderItemsLocal, { service_id: s.id, service_name: s.name, unit_price: Number(s.price || 0), quantity: 1 }]);
   };
 
-  const removeItem = (productId: string) => setNewOrderItemsLocal(prev => prev.filter(i => i.product_id !== productId));
+  const updateItemQuantity = (id: string, qty: number) => {
+    setNewOrderItemsLocal(prev => prev.map(i => {
+      if (i.product_id === id) return { ...i, quantity: Math.max(1, Math.min(i.stock || 0, qty)) };
+      if (i.service_id === id) return { ...i, quantity: Math.max(1, qty) };
+      return i;
+    }));
+  };
+
+  const removeItem = (id: string) => setNewOrderItemsLocal(prev => prev.filter(i => i.product_id !== id && i.service_id !== id));
 
   const totalAmount = useMemo(() => {
     return newOrderItemsLocal.reduce((s, it) => s + (Number(it.unit_price || 0) * Number(it.quantity || 0)), 0);
   }, [newOrderItemsLocal]);
 
+  const onlyServices = useMemo(() => {
+    return newOrderItemsLocal.length > 0 && newOrderItemsLocal.every(i => !!i.service_id && !i.product_id);
+  }, [newOrderItemsLocal]);
+
   const createOrderFromModal = async () => {
     if (newOrderItemsLocal.length === 0) {
-      toast.warning('Ajoutez au moins un produit');
+      toast.warning('Ajoutez au moins un produit ou service');
       return;
     }
     setSavingOrder(true);
     try {
       const payload: any = {
-        items: newOrderItemsLocal.map((it: any) => ({ product_id: it.product_id, product_name: it.product_name, unit_price: it.unit_price, quantity: it.quantity })),
+        items: newOrderItemsLocal.map((it: any) => {
+          if (it.service_id) return { service_id: it.service_id, service_name: it.service_name, unit_price: it.unit_price, quantity: it.quantity };
+          return { product_id: it.product_id, product_name: it.product_name, unit_price: it.unit_price, quantity: it.quantity };
+        }),
         total_amount: totalAmount,
         metadata: { admin_created: true }
       };
@@ -591,7 +646,12 @@ const Orders = () => {
         payload.customer_phone = orderClient.phone || null;
       }
 
-      const resp = await apiFetch('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const token = localStorage.getItem('sessionToken');
+      const resp = await apiFetch('/api/orders', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, 
+        body: JSON.stringify(payload) 
+      });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
         toast.error('❌ Erreur création commande: ' + (err.error || resp.statusText));
@@ -641,7 +701,7 @@ const exportOrder = (order: any) => {
       website: "www.realtech.fr",
       siret: "123 456 789 00012",
       vatNumber: "FR12345678901",
-      logo: "https://via.placeholder.com/150x50/3b82f6/ffffff?text=Realtech+Logo" // Remplacez par votre logo
+      logo: '/assets/logo_realtech.png'
     };
 
     // Données du vendeur (peut être dynamique)
@@ -809,6 +869,11 @@ const exportOrder = (order: any) => {
             font-weight: 600;
             color: #1f2937;
             text-align: right;
+            /* Allow very long order numbers or identifiers to wrap nicely */
+            overflow-wrap: anywhere;
+            word-break: break-all;
+            display: inline-block;
+            max-width: 220px;
           }
           
           /* Tableau des articles */
@@ -823,7 +888,7 @@ const exportOrder = (order: any) => {
           }
           
           .items-table thead {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: aquamarine;
             color: white;
           }
           
@@ -1053,8 +1118,8 @@ const exportOrder = (order: any) => {
           <div class="invoice-header">
             <div class="header-content">
               <div class="company-logo">
-                <img src="${companyInfo.logo}" alt="${companyInfo.name}" class="logo-img">
-                <div class="company-name">${companyInfo.name}</div>
+                <img src="${logo_realtech}" alt="${companyInfo.name}" class="logo-img">
+                <div class="company-name">RealTech Holding</div>
               </div>
               <div class="invoice-title">
                 <h1>FACTURE</h1>
@@ -1073,23 +1138,19 @@ const exportOrder = (order: any) => {
                 <div class="info-content">
                   <div class="info-item">
                     <span class="info-label">Société:</span>
-                    <span class="info-value">${companyInfo.name}</span>
+                    <span class="info-value">RealTech Holding</span>
                   </div>
                   <div class="info-item">
                     <span class="info-label">Adresse:</span>
-                    <span class="info-value">${companyInfo.address}</span>
+                    <span class="info-value">Ouakam Cité Avion</span>
                   </div>
                   <div class="info-item">
                     <span class="info-label">Téléphone:</span>
-                    <span class="info-value">${companyInfo.phone}</span>
+                    <span class="info-value">+221 77 422 03 20</span>
                   </div>
                   <div class="info-item">
                     <span class="info-label">Email:</span>
-                    <span class="info-value">${companyInfo.email}</span>
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">SIRET:</span>
-                    <span class="info-value">${companyInfo.siret}</span>
+                    <span class="info-value">sidydiop.boss@realtechprint.com</span>
                   </div>
                 </div>
               </div>
@@ -1113,29 +1174,6 @@ const exportOrder = (order: any) => {
                   <div class="info-item">
                     <span class="info-label">N° Commande:</span>
                     <span class="info-value">${order.order_number || order.id}</span>
-                  </div>
-                </div>
-              </div>
-              
-              <!-- Vendeur & Dates -->
-              <div class="info-section">
-                <h3>Informations</h3>
-                <div class="info-content">
-                  <div class="info-item">
-                    <span class="info-label">Vendeur:</span>
-                    <span class="info-value">${sellerInfo.name}</span>
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">Département:</span>
-                    <span class="info-value">${sellerInfo.department}</span>
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">Date facture:</span>
-                    <span class="info-value">${invoiceDate}</span>
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">Échéance:</span>
-                    <span class="info-value">${formatDate(dueDate.toISOString())}</span>
                   </div>
                 </div>
               </div>
@@ -1175,8 +1213,562 @@ const exportOrder = (order: any) => {
                 <span class="total-amount">${formatCurrency(subtotal)}</span>
               </div>
               <div class="total-row">
-                <span class="total-label">TVA (20%)</span>
-                <span class="total-amount">${formatCurrency(taxAmount)}</span>
+                <span class="total-label">Remise</span>
+                <span class="total-amount">- ${formatCurrency(order.discount || 0)}</span>
+              </div>
+              <div class="total-row">
+                <span class="total-label">Total TTC</span>
+                <span class="total-amount grand-total">${formatCurrency(totalAmount - (order.discount || 0))}</span>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Pied de page -->
+          <div class="invoice-footer">
+            <div class="terms">
+              <p>
+                <strong>Conditions de paiement:</strong> Paiement à 30 jours fin de mois.<br>
+                <strong>Pénalités de retard:</strong> Taux d'intérêt légal en vigueur majoré de 5 points.<br>
+                <strong>Indemnité forfaitaire pour frais de recouvrement:</strong> 40F CFA.<br>
+                Facture émise électroniquement, valeur probante équivalente à l'original.
+              </p>
+              <p style="margin-top: 20px; font-style: italic;">
+                Merci pour votre confiance !<br>
+                L'équipe RealTech Holding
+              </p>
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>`;
+
+    // add A4 page size and optional stamp if order completed
+    const showStamp = (order.status || '').toString().toLowerCase() === 'completed' || (order.status || '').toString().toLowerCase() === 'terminée' || (order.status || '').toString().toLowerCase() === 'terminée';
+    const stampHtml = showStamp ? `<img src="/assets/cachet_realtech.png" class="invoice-stamp" alt="cachet" />` : '';
+
+    // ensure A4 print size via @page and include stamp element
+    const htmlWithPage = html.replace('</style>', `
+          @page { size: A4; margin: 20mm; }
+          .invoice-stamp { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); width: 160px; opacity: 0.95; }
+        </style>`).replace('</body>', `${stampHtml}</body>`);
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      // fallback: download HTML
+      const blob = new Blob([htmlWithPage], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const filename = `Facture-${order.order_number || order.id}-${formatDate(order.placed_at || order.created_at).replace(/\//g, '-')}.html`;
+      a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return;
+    }
+
+    printWindow.document.write(htmlWithPage);
+    printWindow.document.close();
+    printWindow.onload = () => {
+      setTimeout(() => {
+        printWindow.print();
+        // keep window open so user can save; close after short delay
+        setTimeout(() => { try { printWindow.close(); } catch (e) {} }, 1200);
+      }, 500);
+    };
+    
+  } catch (err) {
+    console.error('Erreur lors de la génération de la facture:', err);
+    // toast.error('❌ Impossible de générer la facture');
+  }
+};
+
+const downloadInvoicePdf = async (order: any) => {
+  try {
+    // Fonctions utilitaires nécessaires
+    const formatDate = (dateString: string | Date) => {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+    };
+
+    const formatCurrency = (amount: number) => {
+      return new Intl.NumberFormat('fr-FR', {
+        style: 'currency',
+        currency: 'XOF',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+      }).format(amount);
+    };
+
+    // Construire les données de la facture
+    const companyInfo = {
+      name: "Realtech Solutions",
+      logo: '/assets/logo_realtech.png'
+    };
+
+    const invoiceDate = formatDate(order.placed_at || order.created_at || new Date());
+    const subtotal = order.total_amount || (order.items || order.order_items || []).reduce((sum: number, item: any) =>
+      sum + (item.total_price || (Number(item.unit_price || 0) * Number(item.quantity || 0))), 0);
+    const taxRate = 0.20;
+    const taxAmount = subtotal * taxRate;
+    const totalAmount = subtotal + taxAmount;
+
+    // Générer le HTML de la facture
+    const html = `<html lang="fr">
+      <head>
+        <meta charset="utf-8" />
+        <title>Facture ${order.order_number || order.id}</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+          
+          * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+          }
+          
+          body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: #1f2937;
+            background: white;
+            min-height: 100vh;
+            padding: 0;
+            margin: 0;
+            width: 210mm;
+            height: 297mm;
+          }
+          
+          .invoice-container {
+            width: 210mm;
+            min-height: 297mm;
+            background: white;
+            margin: 0;
+            padding: 0;
+            position: relative;
+          }
+          
+          /* En-tête avec dégradé */
+          .invoice-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            position: relative;
+            overflow: hidden;
+          }
+          
+          .invoice-header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px);
+            background-size: 30px 30px;
+            opacity: 0.1;
+          }
+          
+          .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: relative;
+            z-index: 1;
+          }
+          
+          .company-logo {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+          }
+          
+          .logo-img {
+            width: 150px;
+            height: auto;
+            filter: brightness(0) invert(1);
+          }
+          
+          .company-name {
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+          }
+          
+          .invoice-title {
+            text-align: right;
+          }
+          
+          .invoice-title h1 {
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 10px;
+          }
+          
+          .invoice-title p {
+            font-size: 16px;
+            opacity: 0.9;
+          }
+          
+          /* Corps de la facture */
+          .invoice-body {
+            padding: 40px;
+          }
+          
+          .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+            padding-bottom: 30px;
+            border-bottom: 2px solid #e5e7eb;
+          }
+          
+          .info-section h3 {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #6b7280;
+            margin-bottom: 15px;
+            font-weight: 600;
+          }
+          
+          .info-content {
+            background: #f9fafb;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #e5e7eb;
+          }
+          
+          .info-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+          }
+          
+          .info-label {
+            color: #6b7280;
+            font-weight: 500;
+          }
+          
+          .info-value {
+            font-weight: 600;
+            color: #1f2937;
+            text-align: right;
+            overflow-wrap: anywhere;
+            word-break: break-all;
+            display: inline-block;
+            max-width: 220px;
+          }
+          
+          /* Tableau des articles */
+          .items-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            margin: 40px 0;
+            overflow: hidden;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+          }
+          
+          .items-table thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+          }
+          
+          .items-table th {
+            padding: 18px 20px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
+          
+          .items-table tbody tr {
+            transition: background 0.2s;
+          }
+          
+          .items-table tbody tr:nth-child(even) {
+            background: #f9fafb;
+          }
+          
+          .items-table tbody tr:hover {
+            background: #f3f4f6;
+          }
+          
+          .items-table td {
+            padding: 16px 20px;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 14px;
+          }
+          
+          .product-name {
+            font-weight: 500;
+            color: #1f2937;
+          }
+          
+          .quantity-cell {
+            text-align: center;
+          }
+          
+          .price-cell, .total-cell {
+            text-align: right;
+            font-family: 'Courier New', monospace;
+            font-weight: 600;
+          }
+          
+          /* Totaux */
+          .totals-section {
+            background: #f9fafb;
+            padding: 30px;
+            border-radius: 12px;
+            border: 1px solid #e5e7eb;
+            margin-top: 40px;
+          }
+          
+          .total-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #e5e7eb;
+          }
+          
+          .total-row:last-child {
+            border-bottom: none;
+            font-size: 18px;
+            font-weight: 700;
+            color: #1f2937;
+            padding-top: 20px;
+          }
+          
+          .total-label {
+            font-size: 14px;
+            color: #6b7280;
+          }
+          
+          .total-amount {
+            font-family: 'Courier New', monospace;
+            font-weight: 600;
+            font-size: 16px;
+          }
+          
+          .grand-total {
+            font-size: 22px !important;
+            color: #059669 !important;
+          }
+          
+          /* Pied de page */
+          .invoice-footer {
+            padding: 40px;
+            background: #f9fafb;
+            border-top: 2px solid #e5e7eb;
+          }
+          
+          .terms {
+            text-align: center;
+            color: #6b7280;
+            font-size: 12px;
+            line-height: 1.6;
+            padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+          }
+          
+          /* Éléments décoratifs */
+          .watermark {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-45deg);
+            font-size: 120px;
+            font-weight: 900;
+            color: rgba(59, 130, 246, 0.05);
+            pointer-events: none;
+            white-space: nowrap;
+            z-index: 0;
+          }
+          
+          @media print {
+            body {
+              background: white;
+              padding: 0;
+              margin: 0;
+              width: 210mm;
+              height: 297mm;
+            }
+            
+            .invoice-container {
+              box-shadow: none;
+              border-radius: 0;
+              width: 210mm;
+              min-height: 297mm;
+            }
+            
+            .invoice-header {
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            
+            .items-table thead {
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+          }
+          
+          @media screen and (max-width: 768px) {
+            body {
+              width: 100%;
+              height: auto;
+            }
+            
+            .invoice-container {
+              width: 100%;
+              min-height: auto;
+            }
+            
+            .invoice-header {
+              padding: 30px 20px;
+            }
+            
+            .header-content {
+              flex-direction: column;
+              text-align: center;
+              gap: 20px;
+            }
+            
+            .company-logo {
+              justify-content: center;
+            }
+            
+            .invoice-title {
+              text-align: center;
+            }
+            
+            .invoice-body {
+              padding: 30px 20px;
+            }
+            
+            .info-grid {
+              grid-template-columns: 1fr;
+            }
+            
+            .items-table {
+              font-size: 12px;
+            }
+            
+            .items-table th,
+            .items-table td {
+              padding: 12px 10px;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="invoice-container">
+          <!-- Filigrane -->
+          <div class="watermark">FACTURE</div>
+          
+          <!-- En-tête -->
+          <div class="invoice-header">
+            <div class="header-content">
+              <div class="company-logo">
+                <div class="company-name"><img src="/assets/logo_realtech.png" alt="logo" style="height:72px;object-fit:contain;margin-bottom:6px" /></div>
+              </div>
+              <div class="invoice-title">
+                <h1>FACTURE</h1>
+                <p>${order.order_number || `INV-${order.id ? order.id.substring(0,8).toUpperCase() : '00000000'}`}</p>
+                <p>Date: ${invoiceDate}</p>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Corps de la facture -->
+          <div class="invoice-body">
+            <!-- Informations -->
+            <div class="info-grid">
+              <!-- Entreprise -->
+              <div class="info-section">
+                <h3>Émetteur</h3>
+                <div class="info-content">
+                  <div class="info-item">
+                    <span class="info-label">Société:</span>
+                    <span class="info-value">RealTech Holding</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Adresse:</span>
+                    <span class="info-value">Ouakam Cité Avion</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Téléphone:</span>
+                    <span class="info-value">+221 77 422 03 20</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Email:</span>
+                    <span class="info-value">sidydiop.boss@realtechprint.com</span>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Client -->
+              <div class="info-section">
+                <h3>Client</h3>
+                <div class="info-content">
+                  <div class="info-item">
+                    <span class="info-label">Nom:</span>
+                    <span class="info-value">${order.client_record?.full_name || order.customer_name || 'Client'}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Email:</span>
+                    <span class="info-value">${order.client_record?.email || order.customer_email || ''}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Téléphone:</span>
+                    <span class="info-value">${order.client_record?.phone || order.customer_phone || ''}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">N° Commande:</span>
+                    <span class="info-value">${order.order_number || order.id || 'N/A'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Tableau des articles -->
+            <table class="items-table">
+              <thead>
+                <tr>
+                  <th width="45%">Description</th>
+                  <th width="15%">Quantité</th>
+                  <th width="20%">Prix unitaire</th>
+                  <th width="20%">Total HT</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${(order.items || order.order_items || []).map((item: any, index: number) => {
+                  const itemTotal = item.total_price || (Number(item.unit_price || 0) * Number(item.quantity || 0));
+                  return `
+                  <tr>
+                    <td class="product-name">
+                      ${item.product_name || 'Produit'} 
+                      ${item.sku ? `<br><small style="color: #6b7280; font-size: 12px;">Réf: ${item.sku}</small>` : ''}
+                    </td>
+                    <td class="quantity-cell">${item.quantity || 0}</td>
+                    <td class="price-cell">${formatCurrency(item.unit_price || 0)}</td>
+                    <td class="total-cell">${formatCurrency(itemTotal)}</td>
+                  </tr>
+                `}).join('')}
+              </tbody>
+            </table>
+            
+            <!-- Totaux -->
+            <div class="totals-section">
+              <div class="total-row">
+                <span class="total-label">Sous-total HT</span>
+                <span class="total-amount">${formatCurrency(subtotal)}</span>
               </div>
               <div class="total-row">
                 <span class="total-label">Remise</span>
@@ -1191,45 +1783,16 @@ const exportOrder = (order: any) => {
           
           <!-- Pied de page -->
           <div class="invoice-footer">
-            <div class="payment-info">
-              <div class="payment-method">
-                <h4>Modes de paiement acceptés</h4>
-                <div style="display: flex; gap: 10px; margin-top: 10px;">
-                  <span style="padding: 6px 12px; background: #f3f4f6; border-radius: 6px; font-size: 12px;">Virement</span>
-                  <span style="padding: 6px 12px; background: #f3f4f6; border-radius: 6px; font-size: 12px;">Carte bancaire</span>
-                  <span style="padding: 6px 12px; background: #f3f4f6; border-radius: 6px; font-size: 12px;">Chèque</span>
-                </div>
-              </div>
-              
-              <div class="payment-method">
-                <h4>Coordonnées bancaires</h4>
-                <div class="bank-details">
-                  <div>BIC: BNPAFRPPXXX</div>
-                  <div>IBAN: FR76 3000 4000 0100 1234 5678 900</div>
-                  <div>Banque: BNP PARIBAS</div>
-                </div>
-              </div>
-              
-              <div class="payment-method">
-                <h4>Contact vendeur</h4>
-                <div style="font-size: 14px;">
-                  <div>${sellerInfo.name}</div>
-                  <div>${sellerInfo.email}</div>
-                  <div>${sellerInfo.phone}</div>
-                </div>
-              </div>
-            </div>
-            
             <div class="terms">
               <p>
                 <strong>Conditions de paiement:</strong> Paiement à 30 jours fin de mois.<br>
                 <strong>Pénalités de retard:</strong> Taux d'intérêt légal en vigueur majoré de 5 points.<br>
-                <strong>Indemnité forfaitaire pour frais de recouvrement:</strong> 40€.<br>
+                <strong>Indemnité forfaitaire pour frais de recouvrement:</strong> 40F CFA.<br>
                 Facture émise électroniquement, valeur probante équivalente à l'original.
               </p>
               <p style="margin-top: 20px; font-style: italic;">
                 Merci pour votre confiance !<br>
-                L'équipe ${companyInfo.name}
+                L'équipe RealTech Holding
               </p>
             </div>
           </div>
@@ -1237,33 +1800,115 @@ const exportOrder = (order: any) => {
       </body>
     </html>`;
 
-    const blob = new Blob([html], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const filename = `Facture-${order.order_number || order.id}-${formatDate(order.placed_at || order.created_at).replace(/\//g, '-')}.html`;
+    // Importer les bibliothèques
+    const [jspdfMod, html2canvasMod] = await Promise.all([
+      import('jspdf'),
+      import('html2canvas')
+    ]);
     
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    const jsPDF = (jspdfMod && (jspdfMod.jsPDF || jspdfMod.default || jspdfMod));
+    const html2canvas = (html2canvasMod && (html2canvasMod.default || html2canvasMod));
     
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    // Ajouter un cachet si la commande est terminée
+    const showStamp = (order.status || '').toString().toLowerCase() === 'completed' || (order.status || '').toString().toLowerCase() === 'terminée' || (order.status || '').toString().toLowerCase() === 'terminee';
+    const stampHtml = showStamp ? `<div style="text-align:center;margin-top:12px"><img src="/assets/cachet_realtech.png" alt="cachet" style="width:160px;opacity:0.95"/></div>` : '';
+
+    // Injecter le cachet juste avant le pied de page
+    const htmlWithStamp = html.replace('<div class="invoice-footer">', `${stampHtml}<div class="invoice-footer">`);
+
+    // Créer un iframe hors écran pour rendre le HTML
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.left = '-9999px';
+    iframe.style.top = '0';
+    iframe.style.width = '210mm';
+    iframe.style.height = '297mm';
+    iframe.style.border = 'none';
+    iframe.style.background = 'white';
     
-    // Vous pouvez utiliser votre système de toast ici
-    // toast.success('✅ Facture téléchargée avec succès');
+    document.body.appendChild(iframe);
     
-    // Option pour ouvrir dans un nouvel onglet
-    const printWindow = window.open(url, '_blank');
-    if (printWindow) {
-      printWindow.onload = () => {
-        printWindow.print();
-      };
+    const doc = iframe.contentDocument || (iframe.contentWindow && iframe.contentWindow.document);
+    if (!doc) {
+      throw new Error('Impossible de créer le document iframe');
     }
     
-  } catch (err) {
-    console.error('Erreur lors de la génération de la facture:', err);
-    // toast.error('❌ Impossible de générer la facture');
+    // Écrire le HTML (avec cachet éventuel) dans l'iframe
+    doc.open();
+    doc.write(htmlWithStamp);
+    doc.close();
+    
+    // Attendre que l'iframe soit complètement chargé
+    await new Promise<void>((resolve) => {
+      if (doc.readyState === 'complete') {
+        resolve();
+      } else {
+        iframe.onload = () => resolve();
+        if (iframe.contentWindow) {
+          iframe.contentWindow.addEventListener('load', () => resolve());
+        }
+      }
+    });
+    
+    // Attendre un peu plus pour que tout soit rendu
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Sélectionner le conteneur principal
+    const invoiceContainer = doc.querySelector('.invoice-container') as HTMLElement;
+    if (!invoiceContainer) {
+      document.body.removeChild(iframe);
+      throw new Error('Conteneur de facture introuvable');
+    }
+    
+    // Configurer html2canvas pour une capture optimisée
+    const canvas = await html2canvas(invoiceContainer, {
+      scale: 2, // Haute qualité
+      useCORS: true,
+      logging: false,
+      backgroundColor: '#ffffff',
+      width: invoiceContainer.offsetWidth,
+      height: invoiceContainer.offsetHeight,
+      onclone: (clonedDoc) => {
+        // Appliquer les styles d'impression sur le clone
+        const clonedContainer = clonedDoc.querySelector('.invoice-container') as HTMLElement;
+        if (clonedContainer) {
+          clonedContainer.style.boxShadow = 'none';
+          clonedContainer.style.borderRadius = '0';
+          clonedContainer.style.maxWidth = '100%';
+        }
+      }
+    });
+    
+    // Nettoyer l'iframe
+    document.body.removeChild(iframe);
+    
+    // Créer le PDF
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
+    
+    // Calculer les dimensions pour s'adapter à la page A4
+    const imgWidth = 210; // Largeur A4 en mm
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+    
+    // Ajouter l'image au PDF
+    pdf.addImage(
+      canvas.toDataURL('image/jpeg', 0.95),
+      'JPEG',
+      0,
+      0,
+      imgWidth,
+      imgHeight
+    );
+    
+    // Télécharger le PDF
+    pdf.save(`Facture-${order.order_number || order.id || 'N/A'}.pdf`);
+    
+  } catch (error) {
+    console.error('Erreur lors de la génération du PDF:', error);
+    throw error;
   }
 };
 
@@ -1429,6 +2074,7 @@ const formatDate = (dateString: string) => {
             </div>
           </CardContent>
         </Card>
+        {!isEmployee && (
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -1442,6 +2088,7 @@ const formatDate = (dateString: string) => {
             </div>
           </CardContent>
         </Card>
+        )}
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -1681,14 +2328,12 @@ const formatDate = (dateString: string) => {
                                     </>
                                   ) : (
                                     <>
-                                      <DropdownMenuItem onClick={() => printOrder(order)}>
-                                        <Printer className="mr-2 h-4 w-4" />
-                                        Imprimer la commande
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={() => exportOrder(order)}>
-                                        <Download className="mr-2 h-4 w-4" />
-                                        Exporter en PDF
-                                      </DropdownMenuItem>
+                                      {order.status !== 'cancelled' && (
+                                        <DropdownMenuItem onClick={() => downloadInvoicePdf(order)}>
+                                          <Download className="mr-2 h-4 w-4" />
+                                          Télécharger le PDF
+                                        </DropdownMenuItem>
+                                      )}
                                       <DropdownMenuSeparator />
                                       {order.status !== 'cancelled' && (
                                         <DropdownMenuItem onClick={() => handleStatusChange(order.id, 'completed')}>
@@ -1786,6 +2431,14 @@ const formatDate = (dateString: string) => {
                 <DialogDescription>
                   Passée le {formatDateTime(selectedOrder.placed_at || selectedOrder.created_at)}
                 </DialogDescription>
+                <div className="flex justify-end gap-2 mt-2">
+                  {((selectedOrder.status || '').toString().toLowerCase() !== 'cancelled' && (selectedOrder.status || '').toString().toLowerCase() !== 'annulée') && (
+                    <Button variant="outline" onClick={() => downloadInvoicePdf(selectedOrder)}>
+                      <Download className="mr-2 h-4 w-4" />
+                      Télécharger PDF
+                    </Button>
+                  )}
+                </div>
               </DialogHeader>
 
               <Tabs defaultValue="overview" className="w-full">
@@ -1907,6 +2560,39 @@ const formatDate = (dateString: string) => {
                       </div>
                     </CardContent>
                   </Card>
+
+                  {/* Treatment history (traiter_par) */}
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm font-medium">Historique traitement</CardTitle>
+                      <CardDescription>
+                        Utilisateurs ayant traité la commande et actions effectuées
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {Array.isArray(selectedOrder?.metadata?.traiter_par) && selectedOrder.metadata.traiter_par.length > 0 ? (
+                        <div className="space-y-2">
+                          {selectedOrder.metadata.traiter_par.map((entry: any, idx: number) => (
+                            <div key={idx} className="flex items-center justify-between">
+                              <div>
+                                <div className="font-medium">{entry.name || entry.user_id || 'Utilisateur'}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {Array.isArray(entry.roles) ? entry.roles.join(', ') : entry.roles}
+                                </div>
+                                <div className="text-xs text-muted-foreground">Action: {entry.action}</div>
+                              </div>
+                              <div className="text-right text-sm">
+                                <div>Count: {entry.count || 1}</div>
+                                <div className="text-xs text-muted-foreground">Dernier: {entry.last_at ? formatDateTime(entry.last_at) : ''}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">Aucun historique de traitement disponible</div>
+                      )}
+                    </CardContent>
+                  </Card>
                 </TabsContent>
 
                 <TabsContent value="products">
@@ -1937,7 +2623,7 @@ const formatDate = (dateString: string) => {
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Produit</TableHead>
+                            <TableHead>Article</TableHead>
                             <TableHead>Quantité</TableHead>
                             <TableHead>Prix unitaire</TableHead>
                             <TableHead>Total</TableHead>
@@ -1947,12 +2633,19 @@ const formatDate = (dateString: string) => {
                           {orderItems.map((item, index) => (
                             <TableRow key={index}>
                               <TableCell>
-                                <div className="font-medium">{item.product_name || 'Produit'}</div>
-                                {item.product_id && (
-                                  <div className="text-xs text-muted-foreground">
-                                    SKU: {item.sku || 'N/A'}
-                                  </div>
-                                )}
+                                <div className="flex items-center gap-2">
+                                  <div className="font-medium">{item.product_name || item.service_name || 'Article'}</div>
+                                  {item.service_id ? (
+                                    <Badge variant="outline" className="text-xs">Service</Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-xs">Produit</Badge>
+                                  )}
+                                </div>
+                                {item.product_id ? (
+                                  <div className="text-xs text-muted-foreground">SKU: {item.sku || 'N/A'}</div>
+                                ) : item.service_id ? (
+                                  <div className="text-xs text-muted-foreground">Service ID: {item.service_id}</div>
+                                ) : null}
                               </TableCell>
                               <TableCell>{item.quantity}</TableCell>
                               <TableCell>{formatCurrency(item.unit_price || 0)}</TableCell>
@@ -2051,8 +2744,8 @@ const formatDate = (dateString: string) => {
 
               <DialogFooter>
                 <div className="flex gap-2 w-full">
-                  {selectedOrder?.status === 'completed' ? (
-                    // only allow cancellation after completion
+                  {/* Show cancel button for completed orders, and always show Download PDF when not cancelled */}
+                  {selectedOrder?.status === 'completed' && (
                     <Button
                       className="w-full"
                       variant="destructive"
@@ -2061,22 +2754,13 @@ const formatDate = (dateString: string) => {
                       <XCircle className="mr-2 h-4 w-4" />
                       Annuler la commande
                     </Button>
-                  ) : (
-                    <>
-                      <Button
-                        variant="outline"
-                        onClick={() => printOrder(selectedOrder)}
-                      >
-                        <Printer className="mr-2 h-4 w-4" />
-                        Imprimer
-                      </Button>
-                      <Button
-                        onClick={() => exportOrder(selectedOrder)}
-                      >
-                        <Download className="mr-2 h-4 w-4" />
-                        Exporter
-                      </Button>
-                    </>
+                  )}
+
+                  {selectedOrder?.status !== 'cancelled' && (
+                    <Button onClick={() => downloadInvoicePdf(selectedOrder)}>
+                      <Download className="mr-2 h-4 w-4" />
+                      Télécharger le PDF
+                    </Button>
                   )}
                 </div>
               </DialogFooter>
@@ -2125,110 +2809,150 @@ const formatDate = (dateString: string) => {
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg flex items-center gap-2">
                 <Package className="w-5 h-5" />
-                Catalogue produits
+                {showServices ? 'Catalogue services' : 'Catalogue produits'}
               </CardTitle>
               <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant={showServices ? 'secondary' : 'ghost'} onClick={() => setShowServices(false)}>Produits</Button>
+                  <Button size="sm" variant={showServices ? 'ghost' : 'secondary'} onClick={() => setShowServices(true)}>Services</Button>
+                </div>
                 <div className="relative flex-1 max-w-xs">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
                   <Input
-                    placeholder="Rechercher produit, catégorie..."
-                    value={productSearch}
-                    onChange={e => setProductSearch(e.target.value)}
+                    placeholder={showServices ? "Rechercher un service..." : "Rechercher produit, catégorie..."}
+                    value={showServices ? serviceSearch : productSearch}
+                    onChange={e => showServices ? setServiceSearch(e.target.value) : setProductSearch(e.target.value)}
                     className="pl-10"
                   />
                 </div>
-                <Select value={productCategoryFilter} onValueChange={setProductCategoryFilter}>
-                  <SelectTrigger className="w-[140px]">
-                    <SelectValue placeholder="Catégorie" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Toutes catégories</SelectItem>
-                    {categories?.map(cat => (
-                      <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {!showServices && (
+                  <Select value={productCategoryFilter} onValueChange={setProductCategoryFilter}>
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue placeholder="Catégorie" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Toutes catégories</SelectItem>
+                      {categories?.map(cat => (
+                        <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             </div>
           </CardHeader>
           <CardContent>
             <div className="space-y-3 max-h-[72vh] overflow-y-auto pr-2">
-              {filteredProducts.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Package className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                  <p>Aucun produit trouvé</p>
-                </div>
-              ) : (
-                filteredProducts.map(p => (
-                  <div
-                    key={p.id}
-                    className={`group flex items-center justify-between p-3 rounded-lg border transition-all hover:border-primary hover:shadow-sm ${
-                      p.stock <= 0 ? 'opacity-60' : ''
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 flex-1">
-                      <div className="w-10 h-10 rounded-md bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center">
-                        <Package className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <div className="font-medium truncate">{p.name}</div>
-                          {p.stock <= 0 && (
-                            <Badge variant="outline" className="text-xs border-red-200 text-red-600">
-                              Rupture
-                            </Badge>
-                          )}
-                          {p.stock > 0 && p.stock <= 10 && (
-                            <Badge variant="outline" className="text-xs border-amber-200 text-amber-600">
-                              Stock faible
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
-                          <span>{p.category?.name || 'Non catégorisé'}</span>
-                          <span>•</span>
-                          <span className="font-semibold text-gray-900">{formatCurrency(Number(p.price || 0))}</span>
-                          <span>•</span>
-                          <span className={p.stock > 10 ? 'text-green-600' : 'text-amber-600'}>
-                            Stock: {p.stock || 0}
-                          </span>
-                        </div>
-                        {p.description && (
-                          <div className="text-xs text-gray-500 mt-1 line-clamp-1">
-                            {p.description}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="text-right">
-                        <div className="font-medium">{formatCurrency(Number(p.price || 0))}</div>
-                        {p.sku && (
-                          <div className="text-xs text-muted-foreground">Ref: {p.sku}</div>
-                        )}
-                      </div>
-                      <Button
-                        size="sm"
-                        onClick={() => addProductToOrder(p)}
-                        disabled={p.stock <= 0}
-                        className={`transition-all ${
-                          p.stock <= 0
-                            ? 'opacity-50 cursor-not-allowed'
-                            : 'hover:scale-105 active:scale-95'
-                        }`}
-                      >
-                        {p.stock > 0 ? (
-                          <>
-                            <Plus className="w-4 h-4 mr-2" />
-                            Ajouter
-                          </>
-                        ) : (
-                          'Rupture'
-                        )}
-                      </Button>
-                    </div>
+              {showServices && (
+                filteredServices.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Package className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p>Aucun service trouvé</p>
                   </div>
-                ))
+                ) : (
+                  filteredServices.map(s => (
+                    <div key={s.id} className="group flex items-center justify-between p-3 rounded-lg border transition-all hover:border-primary hover:shadow-sm">
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className="w-10 h-10 rounded-md bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center">
+                          <Package className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="font-medium">{s.name}</div>
+                          {s.description && <div className="text-sm text-muted-foreground">{s.description}</div>}
+                        </div>
+                        <div className="text-right">
+                          <div className="font-medium">{formatCurrency(Number(s.price || 0))}</div>
+                        </div>
+                      </div>
+                      <div className="ml-4">
+                        <Button size="sm" onClick={() => addServiceToOrder(s)}>
+                          <Plus className="w-4 h-4 mr-2" />
+                          Ajouter
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )
+              )}
+
+              {!showServices && (
+                filteredProducts.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Package className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p>Aucun produit trouvé</p>
+                  </div>
+                ) : (
+                  filteredProducts.map(p => (
+                    <div
+                      key={p.id}
+                      className={`group flex items-center justify-between p-3 rounded-lg border transition-all hover:border-primary hover:shadow-sm ${
+                        p.stock <= 0 ? 'opacity-60' : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className="w-10 h-10 rounded-md bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center">
+                          <Package className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <div className="font-medium truncate">{p.name}</div>
+                            {p.stock <= 0 && (
+                              <Badge variant="outline" className="text-xs border-red-200 text-red-600">
+                                Rupture
+                              </Badge>
+                            )}
+                            {p.stock > 0 && p.stock <= 10 && (
+                              <Badge variant="outline" className="text-xs border-amber-200 text-amber-600">
+                                Stock faible
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
+                            <span>{p.category?.name || 'Non catégorisé'}</span>
+                            <span>•</span>
+                            <span className="font-semibold text-gray-900">{formatCurrency(Number(p.price || 0))}</span>
+                            <span>•</span>
+                            <span className={p.stock > 10 ? 'text-green-600' : 'text-amber-600'}>
+                              Stock: {p.stock || 0}
+                            </span>
+                          </div>
+                          {p.description && (
+                            <div className="text-xs text-gray-500 mt-1 line-clamp-1">
+                              {p.description}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <div className="font-medium">{formatCurrency(Number(p.price || 0))}</div>
+                          {p.sku && (
+                            <div className="text-xs text-muted-foreground">Ref: {p.sku}</div>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => addProductToOrder(p)}
+                          disabled={p.stock <= 0}
+                          className={`transition-all ${
+                            p.stock <= 0
+                              ? 'opacity-50 cursor-not-allowed'
+                              : 'hover:scale-105 active:scale-95'
+                          }`}
+                        >
+                          {p.stock > 0 ? (
+                            <>
+                              <Plus className="w-4 h-4 mr-2" />
+                              Ajouter
+                            </>
+                          ) : (
+                            'Rupture'
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )
               )}
             </div>
             
@@ -2353,6 +3077,9 @@ const formatDate = (dateString: string) => {
                 {newOrderItemsLocal.length > 0 && (
                   <Badge className="ml-2">{newOrderItemsLocal.length}</Badge>
                 )}
+                {onlyServices && (
+                  <Badge variant="secondary" className="ml-3">Services uniquement (client optionnel)</Badge>
+                )}
               </CardTitle>
               {newOrderItemsLocal.length > 0 && (
                 <Button
@@ -2378,16 +3105,20 @@ const formatDate = (dateString: string) => {
               ) : (
                 newOrderItemsLocal.map(it => (
                   <div
-                    key={it.product_id}
+                    key={it.product_id || it.service_id}
                     className="p-3 rounded-lg border group hover:border-primary/50 transition-all"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium truncate">{it.product_name}</div>
+                        <div className="font-medium truncate">{it.product_name || it.service_name}</div>
                         <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
                           <span>{formatCurrency(Number(it.unit_price || 0))} / unité</span>
-                          <span>•</span>
-                          <span>Stock: {getProductStock(it.product_id)}</span>
+                          {it.product_id && (
+                            <>
+                              <span>•</span>
+                              <span>Stock: {getProductStock(it.product_id)}</span>
+                            </>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
@@ -2396,7 +3127,7 @@ const formatDate = (dateString: string) => {
                             variant="outline"
                             size="sm"
                             className="h-8 w-8 p-0"
-                            onClick={() => updateItemQuantity(it.product_id, Math.max(1, Number(it.quantity) - 1))}
+                            onClick={() => updateItemQuantity(it.product_id || it.service_id, Math.max(1, Number(it.quantity) - 1))}
                             disabled={it.quantity <= 1}
                           >
                             <Minus className="w-4 h-4" />
@@ -2405,11 +3136,12 @@ const formatDate = (dateString: string) => {
                             <Input
                               type="number"
                               min="1"
-                              max={getProductStock(it.product_id)}
+                              max={it.product_id ? getProductStock(it.product_id) : undefined}
                               value={it.quantity}
                               onChange={e => {
-                                const value = Math.max(1, Math.min(getProductStock(it.product_id), Number(e.target.value) || 1));
-                                updateItemQuantity(it.product_id, value);
+                                const raw = Number(e.target.value) || 1;
+                                const value = it.product_id ? Math.max(1, Math.min(getProductStock(it.product_id), raw)) : Math.max(1, raw);
+                                updateItemQuantity(it.product_id || it.service_id, value);
                               }}
                               className="text-center"
                             />
@@ -2418,8 +3150,8 @@ const formatDate = (dateString: string) => {
                             variant="outline"
                             size="sm"
                             className="h-8 w-8 p-0"
-                            onClick={() => updateItemQuantity(it.product_id, Number(it.quantity) + 1)}
-                            disabled={Number(it.quantity) >= getProductStock(it.product_id)}
+                            onClick={() => updateItemQuantity(it.product_id || it.service_id, Number(it.quantity) + 1)}
+                            disabled={it.product_id ? Number(it.quantity) >= getProductStock(it.product_id) : false}
                           >
                             <Plus className="w-4 h-4" />
                           </Button>
@@ -2433,7 +3165,7 @@ const formatDate = (dateString: string) => {
                           variant="ghost"
                           size="sm"
                           className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={() => removeItem(it.product_id)}
+                          onClick={() => removeItem(it.product_id || it.service_id)}
                         >
                           <Trash2 className="w-4 h-4 text-destructive" />
                         </Button>
@@ -2463,7 +3195,7 @@ const formatDate = (dateString: string) => {
                       min="0"
                       max={totalAmount}
                     />
-                    <span className="text-xs text-muted-foreground">€</span>
+                    <span className="text-xs text-muted-foreground">F CFA</span>
                   </div>
                 </div>
                 <div className="flex justify-between text-lg font-semibold pt-2 border-t">
@@ -2516,7 +3248,7 @@ const formatDate = (dateString: string) => {
                 </Button>
                 <Button
                   onClick={createOrderFromModal}
-                  disabled={savingOrder || newOrderItemsLocal.length === 0 || !orderClient}
+                  disabled={savingOrder || newOrderItemsLocal.length === 0 || (!onlyServices && !orderClient)}
                   className="h-11"
                 >
                   {savingOrder ? (
@@ -2533,11 +3265,16 @@ const formatDate = (dateString: string) => {
                 </Button>
               </div>
               
-              {(!orderClient || newOrderItemsLocal.length === 0) && (
-                <div className="text-sm text-destructive text-center">
-                  {!orderClient && 'Sélectionnez un client • '}
-                  {newOrderItemsLocal.length === 0 && 'Ajoutez des produits au panier'}
-                </div>
+              {newOrderItemsLocal.length === 0 && (
+                <div className="text-sm text-destructive text-center">Ajoutez des produits au panier</div>
+              )}
+
+              {!onlyServices && !orderClient && newOrderItemsLocal.length > 0 && (
+                <div className="text-sm text-destructive text-center">Sélectionnez un client (obligatoire pour commandes contenant des produits)</div>
+              )}
+
+              {onlyServices && (
+                <div className="text-sm text-muted-foreground text-center">Commande composée uniquement de services — le client est optionnel</div>
               )}
             </div>
           </CardContent>

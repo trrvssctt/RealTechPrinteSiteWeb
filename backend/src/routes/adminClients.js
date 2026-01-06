@@ -2,15 +2,17 @@ const express = require('express');
 const router = express.Router();
 const adminClientsController = require('../controllers/adminClientsController');
 const adminAuth = require('../middleware/adminAuth');
+const adminOrEmployeeAuth = require('../middleware/adminOrEmployeeAuth');
 const requireRole = require('../middleware/requireRole');
 
-router.use(adminAuth);
+// Allow admins and employees to list and create clients
+router.get('/', adminOrEmployeeAuth, adminClientsController.listClients);
+router.get('/:id', adminOrEmployeeAuth, adminClientsController.getClient);
+router.post('/', adminOrEmployeeAuth, adminClientsController.createClient);
 
-router.get('/', requireRole('admin'), adminClientsController.listClients);
-router.get('/:id', requireRole('admin'), adminClientsController.getClient);
-router.post('/', requireRole('admin'), adminClientsController.createClient);
-router.put('/:id', requireRole('admin'), adminClientsController.updateClient);
-router.delete('/:id', requireRole('admin'), adminClientsController.deleteClient);
-router.get('/stats', requireRole('admin'), adminClientsController.stats);
+// Update/delete/stats remain admin-only
+router.put('/:id', adminAuth, requireRole('admin'), adminClientsController.updateClient);
+router.delete('/:id', adminAuth, requireRole('admin'), adminClientsController.deleteClient);
+router.get('/stats', adminAuth, requireRole('admin'), adminClientsController.stats);
 
 module.exports = router;

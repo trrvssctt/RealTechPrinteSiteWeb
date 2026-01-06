@@ -1,5 +1,6 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { useAdmin } from "@/hooks/useAdmin";
+import { useEffect, useState } from 'react';
+import { apiFetch } from '@/lib/api';
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { 
@@ -22,8 +23,43 @@ import { Badge } from "@/components/ui/badge";
 import logo_realtech from '../../../assets/logo_realtech.png';
 
 
-const AdminLayout = () => {
-  const { isAdmin, loading, user } = useAdmin();
+const AdminLayout = ({ children }: { children?: any }) => {
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isEmployee, setIsEmployee] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<any>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchMe = async () => {
+      try {
+        const token = localStorage.getItem('sessionToken');
+        if (!token) {
+          if (mounted) setLoading(false);
+          return;
+        }
+        const resp = await apiFetch('/api/users/me', { headers: { Authorization: `Bearer ${token}` } });
+        if (!resp.ok) {
+          if (mounted) setLoading(false);
+          return;
+        }
+        const payload = await resp.json().catch(() => ({}));
+        if (!mounted) return;
+        const u = payload.user;
+        setUser(u);
+        const rawRoles = u?.roles || [];
+        const roles: string[] = Array.isArray(rawRoles) ? rawRoles.map((r:any) => (r||'').toString().toLowerCase()) : [];
+        setIsAdmin(roles.includes('admin'));
+        setIsEmployee(roles.includes('employee') || roles.includes('employe') || roles.includes('employé') || roles.includes('staff'));
+      } catch (err) {
+        console.error('fetchMe error', err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    fetchMe();
+    return () => { mounted = false; };
+  }, []);
   const location = useLocation();
 
   const handleLogout = async () => {
@@ -48,13 +84,17 @@ const AdminLayout = () => {
     );
   }
 
-  if (!isAdmin) {
+  // allow admins and employees to view the admin layout (employees have restricted actions elsewhere)
+  if (!isAdmin && !isEmployee) {
+    // if not authorized, redirect to login
+    window.location.href = '/ne_ka_connection_page';
     return null;
   }
 
   const navItems = [
     { path: "/admin", icon: LayoutDashboard, label: "Tableau de bord", badge: null },
     { path: "/admin/products", icon: Package, label: "Produits", badge: null },
+    { path: "/admin/services", icon: Package, label: "Services", badge: null },
     { path: "/admin/stock", icon: Package, label: "Stock", badge: null },
     { path: "/admin/users", icon: Users, label: "Utilisateurs", badge: null },
     { path: "/admin/clients", icon: Users, label: "Clients", badge: null },
@@ -62,10 +102,18 @@ const AdminLayout = () => {
     { path: "/admin/orders", icon: ShoppingCart, label: "Commandes", badge: "pending" },
     { path: "/admin/carts", icon: ShoppingCart, label: "Paniers", badge: null },
     { path: "/admin/messages", icon: MessageSquare, label: "Messages", badge: "unread" },
-    { path: "/admin/testimonials", icon: MessageSquare, label: "Témoignages", badge: null },
+    //{ path: "/admin/testimonials", icon: MessageSquare, label: "Témoignages", badge: null },
     { path: "/admin/rapports", icon: ChartAreaIcon, label: "Rapports", badge: null },
     { path: "/admin/contact", icon: Phone, label: "Contacts", badge: null },
   ];
+
+  const filteredNavItems = navItems.filter(item => {
+    if (isEmployee) {
+      // hide Users and Messages pages for employees
+      if (item.path === '/admin/users' || item.path === '/admin/messages') return false;
+    }
+    return true;
+  });
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
@@ -125,7 +173,7 @@ const AdminLayout = () => {
         {/* Sidebar */}
         <aside className="hidden lg:block w-64 min-h-[calc(100vh-4rem)] border-r bg-white">
           <nav className="p-4 space-y-1">
-            {navItems.map((item) => {
+            {filteredNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
               
@@ -199,7 +247,7 @@ const AdminLayout = () => {
 
         {/* Main Content */}
         <main className="flex-1 p-4 lg:p-6 pb-20 lg:pb-6">
-          <Outlet />
+          {children ?? <Outlet />}
         </main>
       </div>
     </div>

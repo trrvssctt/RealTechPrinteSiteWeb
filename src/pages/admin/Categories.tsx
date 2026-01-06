@@ -87,10 +87,31 @@ const Categories = () => {
     meta_description: ""
   });
 
+  const [isEmployee, setIsEmployee] = useState(false);
+
   const ITEMS_PER_PAGE = 10;
 
   useEffect(() => {
     fetchCategories();
+  }, []);
+
+  // detect employee role so we can show read-only UI
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem('sessionToken');
+        const resp = await apiFetch('/api/users/me', { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        if (!resp.ok) return;
+        const payload = await resp.json().catch(() => ({}));
+        const u = payload.user || payload.data || payload;
+        const roles = u?.roles || u?.role_names || u?.role || [];
+        const roleList = Array.isArray(roles) ? roles : (typeof roles === 'string' ? [roles] : []);
+        const isEmp = roleList.some((r:any) => typeof r === 'string' && ['employe','employé','employee','staff'].includes(r.toLowerCase()));
+        setIsEmployee(Boolean(isEmp));
+      } catch (err) {
+        // ignore
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -281,12 +302,14 @@ const Categories = () => {
           setOpenDialog(open); 
           if (!open) resetForm(); 
         }}>
-          <DialogTrigger asChild>
-            <Button className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700">
-              <Plus className="mr-2 h-4 w-4" />
-              Nouvelle catégorie
-            </Button>
-          </DialogTrigger>
+          {!isEmployee && (
+            <DialogTrigger asChild>
+              <Button className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700">
+                <Plus className="mr-2 h-4 w-4" />
+                Nouvelle catégorie
+              </Button>
+            </DialogTrigger>
+          )}
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="text-xl">
@@ -627,7 +650,7 @@ const Categories = () => {
               <p className="text-muted-foreground mb-6">
                 {searchQuery ? 'Essayez une autre recherche' : 'Commencez par créer votre première catégorie'}
               </p>
-              {!searchQuery && (
+              {!searchQuery && !isEmployee && (
                 <Button onClick={() => setOpenDialog(true)}>
                   <Plus className="mr-2 h-4 w-4" />
                   Créer une catégorie
@@ -725,22 +748,28 @@ const Categories = () => {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                               <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                              <DropdownMenuItem onClick={() => handleEdit(category)}>
-                                <Pencil className="mr-2 h-4 w-4" />
-                                Modifier
-                              </DropdownMenuItem>
+                              {!isEmployee && (
+                                <DropdownMenuItem onClick={() => handleEdit(category)}>
+                                  <Pencil className="mr-2 h-4 w-4" />
+                                  Modifier
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem onClick={() => window.open(`/categories/${category.slug}`, '_blank')}>
                                 <Eye className="mr-2 h-4 w-4" />
                                 Voir sur le site
                               </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem 
-                                onClick={() => confirmDelete(category)}
-                                className="text-destructive focus:text-destructive"
-                              >
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Supprimer
-                              </DropdownMenuItem>
+                              {!isEmployee && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem 
+                                    onClick={() => confirmDelete(category)}
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Supprimer
+                                  </DropdownMenuItem>
+                                </>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>

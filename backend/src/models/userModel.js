@@ -19,9 +19,13 @@ async function createUser({ id = null, name, full_name, email, phone, password_h
 
 function mapUserRow(row) {
   if (!row) return null;
+  const rawRoles = row.roles || [];
+  const roles = Array.isArray(rawRoles) ? rawRoles.map(r => (r || '').toString().toLowerCase()) : [];
   return {
     ...row,
     name: row.full_name || row.name || null,
+    roles,
+    role: Array.isArray(roles) && roles.length ? roles[0] : null,
   };
 }
 
@@ -36,7 +40,16 @@ async function getUserByEmail(email) {
 }
 
 async function listUsers({ limit = 100, offset = 0 } = {}) {
-  const res = await pool.query(`SELECT *, full_name FROM app.users ORDER BY created_at DESC LIMIT $1 OFFSET $2`, [limit, offset]);
+  const res = await pool.query(
+    `SELECT u.*, u.full_name, array_remove(array_agg(r.name), NULL) AS roles
+     FROM app.users u
+     LEFT JOIN app.user_roles ur ON ur.user_id = u.id
+     LEFT JOIN app.roles r ON r.id = ur.role_id
+     GROUP BY u.id
+     ORDER BY u.created_at DESC
+     LIMIT $1 OFFSET $2`,
+    [limit, offset]
+  );
   return res.rows.map(mapUserRow);
 }
 
@@ -47,6 +60,14 @@ async function updateUser(id, { name, full_name, email, phone, role_id, is_activ
     [fn, email, phone, role_id, is_active, id]
   );
   return mapUserRow(res.rows[0]);
+}
+
+async function setUserRole(userId, roleId) {
+  // replace existing roles for the user with the provided roleId
+  await pool.query('DELETE FROM app.user_roles WHERE user_id = $1', [userId]);
+  if (roleId) {
+    await pool.query('INSERT INTO app.user_roles (user_id, role_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [userId, roleId]);
+  }
 }
 
 async function deleteUser(id) {
@@ -84,4 +105,5 @@ module.exports = {
   logUserAction,
   ensureRole,
   assignRole,
+  setUserRole,
 };

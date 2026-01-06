@@ -500,6 +500,25 @@ const ClientDetail = () => {
                       <div className="text-xs text-muted-foreground">Inscription</div>
                     </div>
                   </div>
+                    {client.created_by_user_info && (
+                      <div className="flex items-center gap-3 mt-2">
+                        <Users className="h-4 w-4 text-muted-foreground" />
+                        <div className="flex-1">
+                          <div className="font-medium">Créé par {client.created_by_user_info.name || client.created_by_user_info.id}</div>
+                          <div className="text-xs text-muted-foreground">{client.created_by_user_info.email}</div>
+                        </div>
+                      </div>
+                    )}
+
+                    {client.updated_by_user_info && (
+                      <div className="flex items-center gap-3 mt-2">
+                        <Edit className="h-4 w-4 text-muted-foreground" />
+                        <div className="flex-1">
+                          <div className="font-medium">Dernière modification par {client.updated_by_user_info.name || client.updated_by_user_info.id}</div>
+                          <div className="text-xs text-muted-foreground">{client.updated_by_user_info.email}</div>
+                        </div>
+                      </div>
+                    )}
                   
                   {client.last_login_at && (
                     <div className="flex items-center gap-3">

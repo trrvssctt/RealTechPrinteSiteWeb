@@ -390,3 +390,45 @@ REVOKE ALL ON SCHEMA app FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA app FROM PUBLIC;
 
 \echo '--- Script terminé : DB, schéma, tables et historisation créés ---'
+
+-- Assure que metadata existe (jsonb)
+ALTER TABLE app.orders
+  ADD COLUMN IF NOT EXISTS metadata jsonb DEFAULT '{}'::jsonb;
+
+-- Ajouter created_by (UUID)
+ALTER TABLE app.orders
+  ADD COLUMN IF NOT EXISTS created_by uuid;
+
+-- Optionnel : FK vers users (si la table existe)
+ALTER TABLE app.orders
+  ADD CONSTRAINT IF NOT EXISTS fk_orders_created_by_users
+    FOREIGN KEY (created_by) REFERENCES app.users(id) ON DELETE SET NULL;
+
+-- Ajouter colonne traiter_par (jsonb array)
+ALTER TABLE app.orders
+  ADD COLUMN IF NOT EXISTS traiter_par jsonb DEFAULT '[]'::jsonb;
+  
+  
+  -- Copier user_id existant vers created_by quand présent
+UPDATE app.orders
+SET created_by = user_id
+WHERE created_by IS NULL AND user_id IS NOT NULL;
+
+-- Si metadata.traiter_par existe et est un tableau, l'utiliser ; sinon initialiser avec une entrée 'created' basée sur user_id/placed_at
+UPDATE app.orders
+SET traiter_par = CASE
+  WHEN jsonb_typeof(metadata->'traiter_par') = 'array' THEN metadata->'traiter_par'
+  WHEN user_id IS NOT NULL THEN jsonb_build_array(
+    jsonb_build_object(
+      'user_id', user_id,
+      'name', COALESCE((metadata->'customer'->>'name'), NULL),
+      'roles', NULL,
+      'action', 'created',
+      'first_at', to_char(COALESCE(placed_at, created_at, now()), 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),
+      'last_at', to_char(COALESCE(placed_at, created_at, now()), 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),
+      'count', 1
+    )
+  )
+  ELSE traiter_par
+END
+WHERE (metadata->'traiter_par' IS NOT NULL) OR (user_id IS NOT NULL AND (traiter_par IS NULL OR traiter_par = '[]'::jsonb));

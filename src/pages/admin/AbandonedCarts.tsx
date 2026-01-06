@@ -100,13 +100,32 @@ const AbandonedCarts = () => {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [recoveryRate, setRecoveryRate] = useState<number>(0);
+  const [isEmployee, setIsEmployee] = useState<boolean>(false);
 
   const ITEMS_PER_PAGE = 10;
 
   useEffect(() => {
     fetchCarts();
     fetchRecoveryStats();
+    fetchCurrentUserRole();
   }, []);
+
+  const fetchCurrentUserRole = async () => {
+    try {
+      const token = localStorage.getItem('sessionToken');
+      if (!token) return;
+      const resp = await apiFetch('/api/users/me', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!resp.ok) return;
+      const payload = await resp.json();
+      const roles: string[] = payload?.data?.roles || [];
+      const isEmp = roles.some(r => typeof r === 'string' && ['employee', 'employe', 'staff'].includes(r.toLowerCase()));
+      setIsEmployee(!!isEmp);
+    } catch (err) {
+      // ignore - default to non-employee view
+    }
+  };
 
   useEffect(() => {
     let filtered = allCarts;
@@ -433,40 +452,44 @@ L'équipe RealTech`;
           </CardContent>
         </Card>
         
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Valeur perdue</p>
-                <p className="text-3xl font-bold">{stats.abandonedValue.toLocaleString()} FCFA</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {stats.averageCartValue.toLocaleString()} FCFA en moyenne
-                </p>
+        {!isEmployee && (
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Valeur perdue</p>
+                  <p className="text-3xl font-bold">{stats.abandonedValue.toLocaleString()} FCFA</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {stats.averageCartValue.toLocaleString()} FCFA en moyenne
+                  </p>
+                </div>
+                <div className="w-12 h-12 rounded-lg bg-red-100 flex items-center justify-center">
+                  <DollarSign className="h-6 w-6 text-red-600" />
+                </div>
               </div>
-              <div className="w-12 h-12 rounded-lg bg-red-100 flex items-center justify-center">
-                <DollarSign className="h-6 w-6 text-red-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
         
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Potentiel de récupération</p>
-                <p className="text-3xl font-bold text-emerald-600">{stats.recoveryValue.toLocaleString()} FCFA</p>
-                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                  <Target className="h-3 w-3" />
-                  Taux de récupération: {recoveryRate}%
-                </p>
+        {!isEmployee && (
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Potentiel de récupération</p>
+                  <p className="text-3xl font-bold text-emerald-600">{stats.recoveryValue.toLocaleString()} FCFA</p>
+                  <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                    <Target className="h-3 w-3" />
+                    Taux de récupération: {recoveryRate}%
+                  </p>
+                </div>
+                <div className="w-12 h-12 rounded-lg bg-emerald-100 flex items-center justify-center">
+                  <Zap className="h-6 w-6 text-emerald-600" />
+                </div>
               </div>
-              <div className="w-12 h-12 rounded-lg bg-emerald-100 flex items-center justify-center">
-                <Zap className="h-6 w-6 text-emerald-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Recovery Insights */}
