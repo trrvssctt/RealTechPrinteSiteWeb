@@ -338,14 +338,9 @@ const Orders = () => {
         setOrderItems((updated && (updated.items || [])) || orderItems);
       }
 
-      // If order has just been completed, generate final invoice
+      // If order has just been completed, update local stocks (no auto-export/print)
       if (newStatus === 'completed' && updated) {
-        // generate final invoice (download)
-        try {
-          exportOrder(updated);
-        } catch (e) {
-          console.error('Failed to export invoice after completion', e);
-        }
+        // Note: removed automatic invoice/export to avoid opening print/download UI.
         // Optimistically update local product stocks so UI reflects changes immediately
         try {
           const items = updated.items || updated.order_items || [];
@@ -1192,11 +1187,15 @@ const exportOrder = (order: any) => {
               <tbody>
                 ${(order.items || order.order_items || []).map((item: any, index: number) => {
                   const itemTotal = item.total_price || (Number(item.unit_price || 0) * Number(item.quantity || 0));
+                  const isService = !!item.service_id || !!item.service_name;
+                  const description = isService
+                    ? `${item.service_name || 'Service'}<br><small style="color: #6b7280; font-size: 12px;">Service ID: ${item.service_id || ''}</small>`
+                    : `${item.product_name || 'Produit'} ${item.sku ? `<br><small style="color: #6b7280; font-size: 12px;">Réf: ${item.sku}</small>` : ''}`;
+
                   return `
                   <tr>
                     <td class="product-name">
-                      ${item.product_name || 'Produit'} 
-                      ${item.sku ? `<br><small style="color: #6b7280; font-size: 12px;">Réf: ${item.sku}</small>` : ''}
+                      ${description}
                     </td>
                     <td class="quantity-cell">${item.quantity || 0}</td>
                     <td class="price-cell">${formatCurrency(item.unit_price || 0)}</td>
@@ -1351,7 +1350,7 @@ const downloadInvoicePdf = async (order: any) => {
           
           /* En-tête avec dégradé */
           .invoice-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: rgba(14, 214, 236, 0.43);
             color: white;
             padding: 40px;
             position: relative;
@@ -1475,7 +1474,7 @@ const downloadInvoicePdf = async (order: any) => {
           }
           
           .items-table thead {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: rgba(14, 214, 236, 0.43);
             color: white;
           }
           
@@ -1750,11 +1749,15 @@ const downloadInvoicePdf = async (order: any) => {
               <tbody>
                 ${(order.items || order.order_items || []).map((item: any, index: number) => {
                   const itemTotal = item.total_price || (Number(item.unit_price || 0) * Number(item.quantity || 0));
+                  const isService = !!item.service_id || !!item.service_name;
+                  const description = isService
+                    ? `${item.service_name || 'Service'}<br><small style="color: #6b7280; font-size: 12px;">Service ID: ${item.service_id || ''}</small>`
+                    : `${item.product_name || 'Produit'} ${item.sku ? `<br><small style="color: #6b7280; font-size: 12px;">Réf: ${item.sku}</small>` : ''}`;
+
                   return `
                   <tr>
                     <td class="product-name">
-                      ${item.product_name || 'Produit'} 
-                      ${item.sku ? `<br><small style="color: #6b7280; font-size: 12px;">Réf: ${item.sku}</small>` : ''}
+                      ${description}
                     </td>
                     <td class="quantity-cell">${item.quantity || 0}</td>
                     <td class="price-cell">${formatCurrency(item.unit_price || 0)}</td>
@@ -1973,14 +1976,18 @@ const formatDate = (dateString: string) => {
               </tr>
             </thead>
             <tbody>
-              ${(order.items || order.order_items || []).map((item: any) => `
+              ${(order.items || order.order_items || []).map((item: any) => {
+                const isService = !!item.service_id || !!item.service_name;
+                const name = isService ? (item.service_name || 'Service') : (item.product_name || 'Produit');
+                const extra = isService ? `<div style="color:#6b7280;font-size:12px">Service ID: ${item.service_id || ''}</div>` : (item.sku ? `<div style="color:#6b7280;font-size:12px">Réf: ${item.sku}</div>` : '');
+                return `
                 <tr>
-                  <td>${item.product_name || 'Produit'}</td>
+                  <td>${name}${extra}</td>
                   <td>${item.quantity || 0}</td>
                   <td>${formatCurrency(item.unit_price || 0)}</td>
                   <td>${formatCurrency(item.total_price || (Number(item.unit_price || 0) * Number(item.quantity || 0)))}</td>
                 </tr>
-              `).join('')}
+              `}).join('')}
             </tbody>
           </table>
           <div class="total">Total: ${formatCurrency(order.total_amount || 0)}</div>
@@ -3240,6 +3247,7 @@ const formatDate = (dateString: string) => {
               {/* Boutons d'action */}
               <div className="grid grid-cols-2 gap-3 pt-2">
                 <Button
+                  type="button"
                   variant="outline"
                   onClick={() => setCreateOpen(false)}
                   className="h-11"
@@ -3247,6 +3255,7 @@ const formatDate = (dateString: string) => {
                   Annuler
                 </Button>
                 <Button
+                  type="button"
                   onClick={createOrderFromModal}
                   disabled={savingOrder || newOrderItemsLocal.length === 0 || (!onlyServices && !orderClient)}
                   className="h-11"

@@ -167,8 +167,8 @@ const App = () => (
               </div>
             } />
 
-            {/* Auth route (no header/footer) */}
-            <Route path="/ne_ka_connection_page" element={<AdminLogin />} />
+            {/* Auth route (no header/footer) 
+            <Route path="/ne_ka_connection_page" element={<AdminLogin />} />*/}
 
             {/* Admin login (public) */}
             <Route path="/admin/sama_page_de_connection" element={<AdminLogin />} />

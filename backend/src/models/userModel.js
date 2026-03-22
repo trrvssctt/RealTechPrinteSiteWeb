@@ -53,11 +53,11 @@ async function listUsers({ limit = 100, offset = 0 } = {}) {
   return res.rows.map(mapUserRow);
 }
 
-async function updateUser(id, { name, full_name, email, phone, role_id, is_active }) {
+async function updateUser(id, { name, full_name, email, phone, role_id, is_active, password_hash }) {
   const fn = full_name || name || null;
   const res = await pool.query(
-    `UPDATE app.users SET full_name = COALESCE($1, full_name), email = COALESCE($2, email), phone = COALESCE($3, phone), role_id = COALESCE($4, role_id), is_active = COALESCE($5, is_active), updated_at = now() WHERE id = $6 RETURNING *`,
-    [fn, email, phone, role_id, is_active, id]
+    `UPDATE app.users SET full_name = COALESCE($1, full_name), email = COALESCE($2, email), phone = COALESCE($3, phone), role_id = COALESCE($4, role_id), is_active = COALESCE($5, is_active), password_hash = COALESCE($6, password_hash), updated_at = now() WHERE id = $7 RETURNING *`,
+    [fn, email, phone, role_id, is_active, password_hash, id]
   );
   return mapUserRow(res.rows[0]);
 }

@@ -34,7 +34,7 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // CORS configuration
 // Support a single FRONTEND_ORIGIN or a comma-separated FRONTEND_ORIGINS env var.
 // If none provided, default to allowing all origins (development convenience).
-const rawOrigins = process.env.FRONTEND_ORIGINS || process.env.FRONTEND_ORIGIN || 'http://localhost:8080';
+const rawOrigins = process.env.FRONTEND_ORIGINS || process.env.FRONTEND_ORIGIN || 'https://realtechprint.com';
 const allowedOrigins = rawOrigins
   .split(',')
   .map((s) => s.trim())

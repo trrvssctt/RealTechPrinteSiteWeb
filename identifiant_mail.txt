@@ -25,5 +25,12 @@ mot de pass : AmySidyboss@1
 **************************************** FIN ******************************************
 
 
+**************************************** Email Youssouf ******************************************
+email : youssouf.camara@realtechprint.com
+
+mot de pass : youssouDio@1
+
+**************************************** FIN ******************************************
+
 
  lien vers la page de connection de la boite mail : https://mail.realtechprint.com/roundcube/

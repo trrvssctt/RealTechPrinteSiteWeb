@@ -4,7 +4,9 @@ function mapClientRow(row) {
   if (!row) return null;
   return {
     id: row.id,
-    name: row.full_name || null,
+    // provide both `full_name` and `name` for compatibility
+    full_name: row.full_name || null,
+    name: row.full_name || row.name || null,
     email: row.email,
     phone: row.phone,
     created_at: row.created_at,

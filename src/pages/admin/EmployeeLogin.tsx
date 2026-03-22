@@ -95,14 +95,14 @@ const EmployeeLogin = () => {
   });
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-gray-50 via-white to-blue-50">
-      <div className="absolute top-6 left-6 md:top-8 md:left-8 flex items-center gap-3">
-        <div className="w-22 h-15-lg bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shadow-sm">
-          <img src={logo_realtech} alt="RealTech Holding" className="w-25 h-17 " />
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 pt-24 md:pt-8 bg-gradient-to-br from-gray-50 via-white to-blue-50">
+      <div className="absolute top-4 left-4 md:top-8 md:left-8 flex items-center gap-3">
+        <div className="w-16 h-10 md:w-24 md:h-14 rounded-md bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shadow-sm">
+          <img src={logo_realtech} alt="RealTech Holding" className="w-14 h-8 md:w-20 md:h-10 object-contain" />
         </div>
-        <div className="hidden md:block">
-          <h2 className="text-xl font-bold text-gray-900">RealTech Holding</h2>
-          <p className="text-xs text-gray-500">Espace Employé</p>
+        <div className="hidden sm:flex flex-col">
+          <h2 className="text-sm md:text-xl font-bold text-gray-900">RealTech Holding</h2>
+          <p className="text-[10px] md:text-xs text-gray-500">Espace Employé</p>
         </div>
       </div>
 

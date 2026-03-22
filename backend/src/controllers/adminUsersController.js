@@ -35,8 +35,15 @@ const createUser = async (req, res, next) => {
 const updateUser = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, email, phone, role_id, is_active } = req.body;
-    const user = await userModel.updateUser(id, { name, email, phone, role_id, is_active });
+    const { name, email, phone, role_id, is_active, password } = req.body;
+
+    // If password provided, hash it and pass password_hash to model
+    let password_hash = undefined;
+    if (password && String(password).trim() !== '') {
+      password_hash = await bcrypt.hash(String(password), 10);
+    }
+
+    const user = await userModel.updateUser(id, { name, email, phone, role_id, is_active, password_hash });
     // if role_id provided, update the user_roles mapping as well
     if (typeof role_id !== 'undefined' && role_id !== null) {
       await userModel.setUserRole(id, role_id);

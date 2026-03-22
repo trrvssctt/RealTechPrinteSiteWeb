@@ -87,7 +87,7 @@ const AdminLayout = ({ children }: { children?: any }) => {
   // allow admins and employees to view the admin layout (employees have restricted actions elsewhere)
   if (!isAdmin && !isEmployee) {
     // if not authorized, redirect to login
-    window.location.href = '/ne_ka_connection_page';
+    window.location.href = '/admin/sama_page_de_connection';
     return null;
   }
 
@@ -104,7 +104,7 @@ const AdminLayout = ({ children }: { children?: any }) => {
     { path: "/admin/messages", icon: MessageSquare, label: "Messages", badge: "unread" },
     //{ path: "/admin/testimonials", icon: MessageSquare, label: "Témoignages", badge: null },
     { path: "/admin/rapports", icon: ChartAreaIcon, label: "Rapports", badge: null },
-    { path: "/admin/contact", icon: Phone, label: "Contacts", badge: null },
+    //{ path: "/admin/contact", icon: Phone, label: "Contacts", badge: null },
   ];
 
   const filteredNavItems = navItems.filter(item => {
@@ -175,10 +175,11 @@ const AdminLayout = ({ children }: { children?: any }) => {
           <nav className="p-4 space-y-1">
             {filteredNavItems.map((item) => {
               const Icon = item.icon;
-              const isActive = location.pathname === item.path;
+              const targetPath = (item.path === '/admin' && isEmployee) ? '/admin/employe' : item.path;
+              const isActive = location.pathname === targetPath;
               
               return (
-                <Link key={item.path} to={item.path} className="no-underline">
+                <Link key={targetPath} to={targetPath} className="no-underline">
                   <div
                     className={cn(
                       "flex items-center gap-3 px-3 py-3 rounded-lg transition-all",
@@ -214,13 +215,14 @@ const AdminLayout = ({ children }: { children?: any }) => {
         </aside>
 
         {/* Mobile Bottom Navigation */}
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around p-2 z-40">
+          <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around p-2 z-40">
           {navItems.slice(0, 4).map((item) => {
             const Icon = item.icon;
-            const isActive = location.pathname === item.path;
+            const targetPath = (item.path === '/admin' && isEmployee) ? '/admin/employer' : item.path;
+            const isActive = location.pathname === targetPath;
             
             return (
-              <Link key={item.path} to={item.path} className="flex-1">
+              <Link key={targetPath} to={targetPath} className="flex-1">
                 <div className={cn(
                   "flex flex-col items-center p-2 rounded-lg",
                   isActive ? "text-blue-600 bg-blue-50" : "text-gray-500"

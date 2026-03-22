@@ -670,7 +670,7 @@ const ReportsImproved = () => {
             Créez et exportez des rapports détaillés sur vos mouvements de stock
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button 
             variant="outline" 
             onClick={loadSampleData}
@@ -751,10 +751,10 @@ const ReportsImproved = () => {
                 </Select>
               </div>
 
-              {period === 'custom' && (
+                  {period === 'custom' && (
                 <div className="space-y-2">
                   <Label>Plage de dates personnalisée</Label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
                       <Label>Début</Label>
                       <Input type="datetime-local" value={startDate ? new Date(startDate).toISOString().slice(0,16) : ''} onChange={(e) => setStartDate(e.target.value ? new Date(e.target.value).toISOString() : null)} />
@@ -1038,8 +1038,8 @@ const ReportsImproved = () => {
                   </Button>
                 </div>
               ) : (
-                <div className="rounded-md border">
-                  <Table>
+                <div className="rounded-md border overflow-x-auto">
+                  <Table className="min-w-[720px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead>Produit</TableHead>
