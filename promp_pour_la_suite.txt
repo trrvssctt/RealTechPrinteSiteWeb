@@ -1,0 +1,10 @@
+Le #file:DashboardEmployer.tsx  doit monrer unique ment que : Message non lus , Visites, Commande , Produits ,  et adans son navbar il ne doit pas avoir #file:Users.tsx , #file:AbandonedCarts.tsx  et dans les page #file:Products.tsx , #file:Categories.tsx , ne doivent pas comporter des bouton de creation, modification ou suppression
+
+
+A partir de role_id dans users je dois connaitre le roles de l'utlisateur et afficher le necessaire selon le role 
+
+Si le name du role : admin alors le gars apres connection #file:AdminLogin.tsx sera diriger vers #file:Dashboard.tsx  et pourras accerder à tous les page de #file:admin 
+
+Si le name : manager alors apres connection #file:AdminLogin.tsx le gars sera conduit vers la page pourras accder à tous les page de #admin sauf #file:Users.tsx #file:Testimonials.tsx ainsi que la page #file:Roles.tsx 
+
+Si name : employee après connection il sera diriger vers la page #file:DashboardEmployer.tsx  il ne doist pas avoir accesaux page #file:Users.tsx ,#file:Roles.tsx ,#file:Testimonials.tsx  et ne pourras pas creer , modifier ou supprimer des donner dan sles page #file:Products.tsx , #file:Categories.tsx  mais peut le faire dans #file:Orders.tsx 
