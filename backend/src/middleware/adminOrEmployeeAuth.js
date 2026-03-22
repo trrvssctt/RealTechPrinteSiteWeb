@@ -1,7 +1,7 @@
 const db = require('../config/db');
 
-// middleware to require an admin session via Bearer token
-module.exports = async function adminAuth(req, res, next) {
+// middleware to require an admin OR employee session via Bearer token
+module.exports = async function adminOrEmployeeAuth(req, res, next) {
   try {
     const auth = req.headers.authorization;
     if (!auth) return res.status(401).json({ error: 'missing authorization' });
@@ -24,7 +24,9 @@ module.exports = async function adminAuth(req, res, next) {
     if (!rows[0]) return res.status(401).json({ error: 'invalid session' });
     const rawRoles = rows[0].roles || [];
     const roles = Array.isArray(rawRoles) ? rawRoles.map(r => (r || '').toString().toLowerCase()) : [];
-    if (!roles.includes('admin')) return res.status(403).json({ error: 'admin required' });
+    // accept admin or employee-like roles
+    const ok = roles.includes('admin') || roles.includes('employe') || roles.includes('employé') || roles.includes('employee') || roles.includes('staff');
+    if (!ok) return res.status(403).json({ error: 'admin or employee required' });
 
     // attach user id and normalized roles to request
     req.user = { id: rows[0].id, roles };

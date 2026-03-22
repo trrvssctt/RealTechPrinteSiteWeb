@@ -6,8 +6,8 @@ const db = require('../config/db');
 // columns and map `updated_at` -> `last_activity_at` for compatibility.
 exports.listCarts = async (req, res, next) => {
   try {
-    const { rows } = await db.query(
-      `SELECT
+    const { client_id, email } = req.query;
+    let q = `SELECT
          c.id,
          c.session_id,
          c.user_id,
@@ -17,9 +17,22 @@ exports.listCarts = async (req, res, next) => {
          c.updated_at,
          COALESCE(jsonb_agg(to_jsonb(ci) - 'cart_id' ORDER BY ci.id) FILTER (WHERE ci.id IS NOT NULL), '[]') AS items
        FROM app.carts c
-       LEFT JOIN app.cart_items ci ON ci.cart_id = c.id
-       GROUP BY c.id
-       ORDER BY c.updated_at DESC`);
+       LEFT JOIN app.cart_items ci ON ci.cart_id = c.id`;
+    const where = [];
+    const params = [];
+    if (client_id) {
+      params.push(client_id);
+      // some deployments may store client id in user_id or session metadata; try matching user_id
+      where.push(`c.user_id = $${params.length}`);
+    }
+    if (email) {
+      params.push(`%${email}%`);
+      // best-effort: search the JSON `items` column (stringified) for the email
+      where.push(`COALESCE(c.items::text, '') ILIKE $${params.length}`);
+    }
+    if (where.length > 0) q += ` WHERE ` + where.join(' AND ');
+    q += ` GROUP BY c.id ORDER BY c.updated_at DESC`;
+    const { rows } = await db.query(q, params);
 
     // Normalize rows so frontend can expect last_activity_at and some other fields.
     const normalized = rows.map(r => ({

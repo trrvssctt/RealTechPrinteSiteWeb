@@ -1,17 +1,51 @@
 const db = require('../config/db');
 
-const listProducts = async () => {
-  const { rows } = await db.query(`
-    SELECT p.*, jsonb_build_object('id', c.id, 'name', c.name) AS category,
-      (
+const listProducts = async (opts = {}) => {
+  // opts: { limit, offset, includeImages = true, category_id, search }
+  const {
+    limit = 100,
+    offset = 0,
+    includeImages = true,
+    category_id = null,
+    search = null,
+  } = opts;
+
+  // Build selected fields — avoid fetching large text fields by default
+  const fields = [
+    'p.id', 'p.name', 'p.slug', 'p.price', 'p.image_url', 'p.featured', 'p.stock', 'p.in_stock', 'p.created_at'
+  ];
+
+  // include short_description only if explicitly asked (not in opts currently)
+
+  // Join category
+  let sql = `SELECT ${fields.join(', ')}, jsonb_build_object('id', c.id, 'name', c.name) AS category`;
+
+  if (includeImages) {
+    sql += `, (
         SELECT coalesce(jsonb_agg(jsonb_build_object('url', pi.url, 'alt', pi.alt, 'order', pi.position) ORDER BY pi.position), '[]'::jsonb)
         FROM app.product_images pi WHERE pi.product_id = p.id
-      ) AS images
-    FROM app.products p
-    LEFT JOIN app.categories c ON p.category_id = c.id
-    WHERE p.is_active = true
-    ORDER BY p.created_at DESC
-  `);
+      ) AS images`;
+  }
+
+  sql += ` FROM app.products p LEFT JOIN app.categories c ON p.category_id = c.id WHERE p.is_active = true`;
+
+  const params = [];
+  let idx = 1;
+  if (category_id) {
+    sql += ` AND p.category_id = $${idx}`;
+    params.push(category_id);
+    idx++;
+  }
+  if (search) {
+    sql += ` AND (p.name ILIKE $${idx} OR p.short_description ILIKE $${idx} OR p.description ILIKE $${idx})`;
+    params.push(`%${search}%`);
+    idx++;
+  }
+
+  sql += ` ORDER BY p.created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`;
+  params.push(limit, offset);
+
+  const { rows } = await db.query(sql, params);
   return rows;
 };
 
