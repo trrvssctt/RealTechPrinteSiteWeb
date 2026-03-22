@@ -25,7 +25,7 @@ export const useAdmin = () => {
       if (!token) {
         setIsAdmin(false);
         setUser(null);
-        navigate('/ne_ka_connection_page');
+        navigate('/admin/sama_page_de_connection');
         return;
       }
 
@@ -33,7 +33,7 @@ export const useAdmin = () => {
       if (!resp.ok) {
         setIsAdmin(false);
         setUser(null);
-        navigate('/ne_ka_connection_page');
+        navigate('/admin/sama_page_de_connection');
         return;
       }
 
@@ -45,13 +45,13 @@ export const useAdmin = () => {
         setIsAdmin(true);
       } else {
         setIsAdmin(false);
-        navigate('/');
+        navigate('/admin/sama_page_de_connection');
       }
     } catch (err) {
       console.error('Error checking admin status:', err);
       setIsAdmin(false);
       setUser(null);
-      navigate('/ne_ka_connection_page');
+      navigate('/admin/sama_page_de_connection');
     } finally {
       setLoading(false);
     }
