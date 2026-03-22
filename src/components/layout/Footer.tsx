@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
 import { Phone, Mail, MapPin, Facebook, Instagram } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import logo from '@/assets/logo_realtech.svg';
+import logo_realtech from '../../../assets/logo_realtech.png';
+
 
 const Footer = () => {
   const phoneNumber = '+221774220320';
@@ -14,8 +15,9 @@ const Footer = () => {
           {/* Company Info */}
           <div>
             <div className="flex items-center space-x-3 mb-4">
-              <img src={logo} alt="RealTech" className="w-10 h-10 rounded-lg shadow-sm object-cover" />
-              <h3 className="text-lg font-bold">RealTech Holding</h3>
+              <Link to="/" className="flex items-center space-x-3 group">
+                <img src={logo_realtech} alt="RealTech" className="w-17 h-14 lg shadow-md object-cover" />
+              </Link>
             </div>
             <p className="text-sm text-muted-foreground mb-4">
               Votre partenaire de confiance pour l'impression, la sérigraphie et le matériel informatique au Sénégal.
@@ -90,8 +92,8 @@ const Footer = () => {
               </li>
               <li className="flex items-start space-x-2">
                 <Mail className="w-4 h-4 mt-1 text-primary flex-shrink-0" />
-                <a href="mailto:contact@realtech.sn" className="text-sm text-muted-foreground hover:text-primary transition-colors">
-                  contact@realtech.sn
+                <a href="mailto:sidydiop.boss@realtechprint.com" className="text-sm text-muted-foreground hover:text-primary transition-colors">
+                  sidydiop.boss@realtechprint.com
                 </a>
               </li>
               <li className="flex items-start space-x-2">
@@ -120,6 +122,12 @@ const Footer = () => {
               </Link>
               <Link to="/confidentialite" className="hover:text-primary transition-colors">
                 Confidentialité
+              </Link>
+              <Link to="/conditions-generales" className="hover:text-primary transition-colors">
+                CGV
+              </Link>
+              <Link to="/cookies" className="hover:text-primary transition-colors">
+                Cookies
               </Link>
             </div>
           </div>

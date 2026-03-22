@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Package, ShoppingCart, DollarSign, TrendingUp, Calendar, TrendingDown, Users, ShoppingBag, Mail, ArrowUpRight, ArrowDownRight, Eye, BarChart3 } from "lucide-react";
 import { Link } from 'react-router-dom';
+import AdminLayout from '@/components/admin/AdminLayout';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { format, subDays, startOfMonth, endOfMonth, startOfDay, endOfDay } from "date-fns";
@@ -25,7 +26,7 @@ const CHART_COLORS = {
   info: "hsl(199 89% 48%)",
 };
 
-const Dashboard = () => {
+const DashboardEmployer = () => {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("30days");
   const [stats, setStats] = useState({
     totalProducts: 0,
@@ -45,10 +46,33 @@ const Dashboard = () => {
   const [categoriesData, setCategoriesData] = useState<any[]>([]);
   const [unreadMessages, setUnreadMessages] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const [isEmployee, setIsEmployee] = useState(false);
 
   useEffect(() => {
     fetchStats();
   }, [timeFilter]);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchMe = async () => {
+      try {
+        const token = localStorage.getItem('sessionToken');
+        if (!token) return;
+        const resp = await apiFetch('/api/users/me', { headers: { Authorization: `Bearer ${token}` } });
+        if (!resp.ok) return;
+        const payload = await resp.json().catch(() => ({}));
+        if (!mounted) return;
+        const u = payload.user;
+        const rawRoles = u?.roles || [];
+        const roles: string[] = Array.isArray(rawRoles) ? rawRoles.map((r:any) => (r||'').toString().toLowerCase()) : [];
+        setIsEmployee(roles.includes('employee') || roles.includes('employe') || roles.includes('employé') || roles.includes('staff'));
+      } catch (err) {
+        // ignore
+      }
+    };
+    fetchMe();
+    return () => { mounted = false; };
+  }, []);
 
   // Poll for new contact messages and show a toast when new ones arrive
   const lastCountRef = useRef<number | null>(null);
@@ -250,12 +274,17 @@ const Dashboard = () => {
         .map(([name, value]) => ({ name, value: Math.round(value) }))
         .sort((a, b) => b.value - a.value);
 
+      // If current user is an employee, mask revenue information
+      const maskedRevenue = isEmployee ? 0 : revenue;
+      const maskedPreviousRevenue = isEmployee ? 0 : previousRevenue;
+      const maskedRevenueChart = isEmployee ? [] : revenueChartData;
+
       setStats({
         totalProducts: productsCount || 0,
         totalOrders: totalOrders || 0,
-        totalRevenue: revenue,
+        totalRevenue: maskedRevenue,
         pendingOrders: allOrders.filter((o: any) => o.status === 'pending').length || 0,
-        previousRevenue,
+        previousRevenue: maskedPreviousRevenue,
         previousOrders: ordersPrevious.length || 0,
         totalVisits,
         previousVisits: previousVisitsCount || 0,
@@ -263,7 +292,7 @@ const Dashboard = () => {
         abandonedCarts,
         conversionRate,
       });
-      setRevenueData(revenueChartData);
+      setRevenueData(maskedRevenueChart);
       setOrdersData(ordersChartData);
       setCategoriesData(categoriesChartData);
     } catch (error) {
@@ -310,15 +339,6 @@ const Dashboard = () => {
       color: "bg-gradient-to-br from-emerald-500 to-green-600",
       iconColor: "text-emerald-100",
       description: "Commandes totales"
-    },
-    {
-      title: "Revenu Total",
-      value: `${stats.totalRevenue.toLocaleString()} FCFA`,
-      icon: DollarSign,
-      change: revenueChange,
-      color: "bg-gradient-to-br from-violet-500 to-purple-600",
-      iconColor: "text-violet-100",
-      description: "Chiffre d'affaires"
     },
   ];
 
@@ -522,57 +542,6 @@ const Dashboard = () => {
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Revenue Chart */}
-        <Card className="border hover:shadow-md transition-shadow">
-          <CardHeader className="border-b">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-xl">Chiffre d'affaires</CardTitle>
-                <CardDescription>Évolution du revenu sur la période</CardDescription>
-              </div>
-              <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                <BarChart3 className="h-4 w-4 text-blue-600" />
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={revenueData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                <XAxis 
-                  dataKey="date" 
-                  stroke="hsl(var(--muted-foreground))"
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis 
-                  stroke="hsl(var(--muted-foreground))"
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(value) => `${value / 1000}k`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "8px",
-                    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                  }}
-                  formatter={(value) => [`${value} FCFA`, 'Revenu']}
-                  labelFormatter={(label) => `Date: ${label}`}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="montant" 
-                  stroke={CHART_COLORS.primary} 
-                  strokeWidth={3}
-                  dot={{ fill: CHART_COLORS.primary, strokeWidth: 2, r: 4 }}
-                  activeDot={{ r: 6, strokeWidth: 0 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
 
         {/* Orders Chart */}
         <Card className="border hover:shadow-md transition-shadow">
@@ -623,6 +592,7 @@ const Dashboard = () => {
         </Card>
 
         {/* Categories Chart */}
+        {!isEmployee && (
         <Card className="lg:col-span-2 border hover:shadow-md transition-shadow">
           <CardHeader className="border-b">
             <div className="flex items-center justify-between">
@@ -711,6 +681,7 @@ const Dashboard = () => {
             </div>
           </CardContent>
         </Card>
+        )}
       </div>
 
       {/* Loading State */}
@@ -726,4 +697,10 @@ const Dashboard = () => {
   );
 };
 
-export default Dashboard;
+const Wrapped = () => (
+  <AdminLayout>
+    <DashboardEmployer />
+  </AdminLayout>
+);
+
+export default Wrapped;

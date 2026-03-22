@@ -4,6 +4,7 @@ import { Phone, ShoppingCart, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useCart } from '@/contexts/CartContext';
 import { useState } from 'react';
+import logo_realtech from '../../../assets/logo_realtech.png';
 
 const Header = () => {
   const { totalItems } = useCart();
@@ -26,11 +27,7 @@ const Header = () => {
         <div className="flex items-center justify-between h-20">
           {/* Logo */}
           <Link to="/" className="flex items-center space-x-3 group">
-            <img src={logo} alt="RealTech" className="w-12 h-12 rounded-lg shadow-md object-cover" />
-            <div className="hidden md:block">
-              <h1 className="text-xl font-bold text-foreground">RealTech Holding</h1>
-              <p className="text-xs text-muted-foreground">Votre partenaire technologique</p>
-            </div>
+            <img src={logo_realtech} alt="RealTech" className="w-17 h-14 lg shadow-md object-cover" />
           </Link>
 
           {/* Desktop Navigation */}

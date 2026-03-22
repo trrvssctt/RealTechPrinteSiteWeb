@@ -22,7 +22,11 @@ const Cart = () => {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [existingClient, setExistingClient] = useState<any | null>(null);
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
 
   const generateWhatsAppMessage = () => {
     const products = cart
@@ -34,7 +38,7 @@ const Cart = () => {
 
   const whatsappLink = `https://wa.me/221774220320?text=${generateWhatsAppMessage()}`;
 
-  const submitOrder = async () => {
+  const submitOrderConfirmed = async () => {
     try {
       if (!customerName || !customerPhone) {
         toast.error('Veuillez renseigner votre nom et téléphone');
@@ -44,6 +48,7 @@ const Cart = () => {
       const payload = {
         customer_name: customerName,
         customer_phone: customerPhone,
+        customer_email: customerEmail || null,
         items: cart.map((i) => ({ product_id: i.product_id || null, product_name: i.name, unit_price: i.price, quantity: i.quantity })),
         total_amount: totalPrice,
       };
@@ -63,6 +68,36 @@ const Cart = () => {
       toast.error('Erreur lors de la création de la commande');
     } finally {
       setSubmitting(false);
+      setExistingClient(null);
+      setConfirmDialogOpen(false);
+    }
+  };
+
+  const submitOrder = async () => {
+    // first, if email or phone provided, check existing client
+    try {
+      if (customerEmail || customerPhone) {
+        setLookupLoading(true);
+        const q = customerEmail ? `email=${encodeURIComponent(customerEmail)}` : `phone=${encodeURIComponent(customerPhone)}`;
+        const resp = await apiFetch(`/api/clients/lookup?${q}`);
+        if (resp.ok) {
+          const body = await resp.json();
+          if (body?.client) {
+            // found existing client: ask confirmation
+            setExistingClient(body.client);
+            setConfirmDialogOpen(true);
+            return;
+          }
+        }
+      }
+      // no existing or no contact provided -> proceed
+      await submitOrderConfirmed();
+    } catch (err) {
+      console.error(err);
+      // fallback: proceed to submit to avoid blocking if lookup fails
+      await submitOrderConfirmed();
+    } finally {
+      setLookupLoading(false);
     }
   };
 
@@ -180,6 +215,10 @@ const Cart = () => {
                 <label className="text-sm font-medium">Votre téléphone</label>
                 <Input value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="Téléphone" />
               </div>
+              <div>
+                <label className="text-sm font-medium">Email (optionnel)</label>
+                <Input value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} placeholder="Email (optionnel)" />
+              </div>
             </div>
 
             <DialogFooter>
@@ -205,6 +244,38 @@ const Cart = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+          {/* Existing client confirmation */}
+          <Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Compte existant détecté</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                {existingClient ? (
+                  <div>
+                    <p className="font-medium">Un compte existe déjà avec ces informations :</p>
+                    <div className="mt-2">
+                      <div><strong>Nom:</strong> {existingClient.name || existingClient.full_name || '—'}</div>
+                      <div><strong>Email:</strong> {existingClient.email || '—'}</div>
+                      <div><strong>Téléphone:</strong> {existingClient.phone || '—'}</div>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-3">Souhaitez-vous associer votre commande à ce compte ?</p>
+                  </div>
+                ) : (
+                  <p>Vérification en cours...</p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setConfirmDialogOpen(false); setExistingClient(null); }}>
+                  Annuler
+                </Button>
+                <Button onClick={submitOrderConfirmed} disabled={submitting || lookupLoading}>
+                  Confirmer et passer la commande
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
       </div>
     </div>
   );
