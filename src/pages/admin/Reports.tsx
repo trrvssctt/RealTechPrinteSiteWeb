@@ -1,1156 +1,866 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { 
-  Card, CardContent, CardHeader, CardTitle, CardDescription 
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { 
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue 
-} from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Skeleton } from '@/components/ui/skeleton';
-import { 
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow 
-} from '@/components/ui/table';
-import { 
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter 
-} from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
-// replaced DatePickerWithRange (missing) with native date inputs
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Skeleton } from '@/components/ui/skeleton';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
-import { 
-  Download, FileText, FileSpreadsheet, FileImage, 
-  Printer, Filter, RefreshCw, BarChart, TrendingUp, 
-  Package, Calendar, Eye, Settings, ChevronDown,
-  CheckCircle, AlertCircle, Clock
+import { format } from 'date-fns';
+import { fr } from 'date-fns/locale';
+import {
+  FileBarChart2, Download, RefreshCw, Loader2, Send, Plus,
+  FileSpreadsheet, FileText, FileClock, Calendar, User,
+  ChevronLeft, ChevronRight, Search, Filter, CheckCircle,
+  Mail, Clock, BarChart3, Layers,
+  AlertCircle, Package, ShoppingCart, TrendingDown,
 } from 'lucide-react';
 
-const periodOptions = [
-  { value: 'today', label: 'Aujourd\'hui', icon: Clock },
-  { value: 'yesterday', label: 'Hier', icon: Calendar },
-  { value: 'week', label: 'Cette semaine', icon: TrendingUp },
-  { value: 'month', label: 'Ce mois', icon: Calendar },
-  { value: 'quarter', label: 'Trimestre', icon: BarChart },
-  { value: 'year', label: 'Année', icon: TrendingUp },
-  { value: 'custom', label: 'Personnalisé', icon: Settings }
-];
+const ITEMS_PER_PAGE = 15;
 
-const formatOptions = [
-  { value: 'pdf', label: 'PDF', icon: FileText, color: 'text-red-500' },
-  { value: 'excel', label: 'Excel', icon: FileSpreadsheet, color: 'text-green-600' },
-  { value: 'csv', label: 'CSV', icon: FileSpreadsheet, color: 'text-blue-600' },
-  { value: 'png', label: 'PNG', icon: FileImage, color: 'text-purple-500' },
-  { value: 'print', label: 'Imprimer', icon: Printer, color: 'text-gray-600' }
-];
+const TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  journalier:  { label: 'Journalier',  color: 'bg-blue-100 text-blue-800' },
+  mensuelle:   { label: 'Mensuel',     color: 'bg-purple-100 text-purple-800' },
+  annuelle:    { label: 'Annuel',      color: 'bg-indigo-100 text-indigo-800' },
+  personnalise:{ label: 'Personnalisé',color: 'bg-orange-100 text-orange-800' },
+};
 
-const reportTypes = [
-  { value: 'summary', label: 'Résumé', description: 'Vue d\'ensemble des mouvements' },
-  { value: 'detailed', label: 'Détaillé', description: 'Liste complète des transactions' },
-  { value: 'analytics', label: 'Analytique', description: 'Graphiques et tendances' },
-  { value: 'inventory', label: 'Inventaire', description: 'Niveaux de stock actuels' }
-];
+const FORMAT_LABELS: Record<string, { label: string; color: string; icon: React.ElementType }> = {
+  xls:  { label: 'XLSX', color: 'bg-emerald-100 text-emerald-800', icon: FileSpreadsheet },
+  xlsx: { label: 'XLSX', color: 'bg-emerald-100 text-emerald-800', icon: FileSpreadsheet },
+  csv:  { label: 'CSV',  color: 'bg-sky-100 text-sky-800',         icon: FileText },
+  pdf:  { label: 'PDF',  color: 'bg-red-100 text-red-800',         icon: FileText },
+};
 
-const ReportsImproved = () => {
-  const [period, setPeriod] = useState<string>('week');
-  const [format, setFormat] = useState<string>('pdf');
-  const [reportType, setReportType] = useState<string>('summary');
-  const [startDate, setStartDate] = useState<string | null>(null);
-  const [endDate, setEndDate] = useState<string | null>(null);
-  const [movements, setMovements] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+function fmtDate(iso: string, withTime = false) {
+  try {
+    return format(new Date(iso), withTime ? "dd MMM yyyy 'à' HH:mm" : 'dd MMM yyyy', { locale: fr });
+  } catch { return '—'; }
+}
+
+function periodFromParams(params: any): string {
+  if (!params) return '—';
+  const s = params.start || params.date_debut;
+  const e = params.end   || params.date_fin;
+  if (!s) return '—';
+  const start = format(new Date(s), 'dd/MM/yyyy');
+  const end   = e ? format(new Date(e), 'dd/MM/yyyy') : 'maintenant';
+  return `${start} → ${end}`;
+}
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// ── CSV/Excel client-side export ─────────────────────────────────────────────
+
+function downloadCSV(rows: any[][], filename: string) {
+  const csv = rows.map(r =>
+    r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')
+  ).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+const Reports = () => {
+  const [rapports, setRapports] = useState<any[]>([]);
+  const [loading, setLoading]   = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // filters
+  const [search,      setSearch]      = useState('');
+  const [filterType,  setFilterType]  = useState('all');
+  const [filterFmt,   setFilterFmt]   = useState('all');
+  const [filterStart, setFilterStart] = useState('');
+  const [filterEnd,   setFilterEnd]   = useState('');
+
+  // daily report dialog
+  const [dailyOpen,  setDailyOpen]  = useState(false);
+  const [dailyDate,  setDailyDate]  = useState(todayISO());
+  const [dailySending, setDailySending] = useState(false);
+
+  // generate custom dialog
+  const [genOpen,    setGenOpen]    = useState(false);
+  const [genType,    setGenType]    = useState('journalier');
+  const [genFmt,     setGenFmt]     = useState('xls');
+  const [genStart,   setGenStart]   = useState(todayISO());
+  const [genEnd,     setGenEnd]     = useState(todayISO());
+  const [genSources, setGenSources] = useState({ ventes: true, stock: true, depenses: true });
   const [generating, setGenerating] = useState(false);
-  const [showFilters, setShowFilters] = useState(true);
-  const [showPreview, setShowPreview] = useState(false);
-  const [emailReport, setEmailReport] = useState(false);
-  const [emailAddress, setEmailAddress] = useState('');
-  const [reportTitle, setReportTitle] = useState('Rapport des Mouvements');
-  const [includeCharts, setIncludeCharts] = useState(true);
-  const [includeSummary, setIncludeSummary] = useState(true);
-  const [customColumns, setCustomColumns] = useState<string[]>([
-    'product', 'type', 'quantity', 'date', 'reference'
-  ]);
 
-  // Initialize default dates
-  useEffect(() => {
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-    
-    setStartDate(start.toISOString());
-    setEndDate(end.toISOString());
-    fetchProducts();
-  }, []);
+  useEffect(() => { fetchRapports(); }, []);
 
-  // Handle period change
-  useEffect(() => {
-    if (period !== 'custom') {
-      const now = new Date();
-      let start = new Date();
-      let end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+  // ── Data fetching ────────────────────────────────────────────────────────
 
-      switch(period) {
-        case 'today':
-          start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-          break;
-        case 'yesterday':
-          start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-          end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59);
-          break;
-        case 'week':
-          start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
-          break;
-        case 'month':
-          start = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
-          break;
-        case 'quarter':
-          start = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
-          break;
-        case 'year':
-          start = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-          break;
-      }
-
-      setStartDate(start.toISOString());
-      setEndDate(end.toISOString());
-    }
-  }, [period]);
-
-  const fetchProducts = async () => {
-    try {
-      const resp = await apiFetch('/api/products?limit=1000');
-      if (resp.ok) {
-        const data = await resp.json();
-        setProducts(Array.isArray(data.data) ? data.data : []);
-      }
-    } catch (e) {
-      console.error('Error fetching products:', e);
-    }
-  };
-
-  const fetchReportData = async () => {
-    if (!startDate || !endDate) {
-      toast.error('Veuillez sélectionner une plage de dates');
-      return;
-    }
-
+  const fetchRapports = async () => {
     setLoading(true);
     try {
-      const qs = [
-        `start=${encodeURIComponent(startDate)}`,
-        `end=${encodeURIComponent(endDate)}`,
-        'limit=1000'
-      ].join('&');
-      
-      const url = `/api/admin/stock-mouvements?${qs}`;
-      const resp = await apiFetch(url);
-      
-      if (!resp.ok) throw new Error('Failed to fetch data');
-      
-      const data = await resp.json();
-      setMovements(Array.isArray(data.data) ? data.data : []);
-      toast.success(`${data.data?.length || 0} mouvements chargés`);
-    } catch (e) {
-      console.error(e);
-      toast.error('Impossible de charger les données');
+      const resp = await apiFetch('/api/admin/rapports?limit=500');
+      if (!resp.ok) throw new Error();
+      const j = await resp.json();
+      setRapports(Array.isArray(j.data) ? j.data : []);
+    } catch {
+      toast.error('Impossible de charger les rapports');
     } finally {
       setLoading(false);
     }
   };
 
-  const reportSummary = useMemo(() => {
-    const totalIn = movements
-      .filter(m => m.movement_type === 'in')
-      .reduce((sum, m) => sum + (Number(m.quantity) || 0), 0);
-    
-    const totalOut = movements
-      .filter(m => m.movement_type === 'out')
-      .reduce((sum, m) => sum + (Number(m.quantity) || 0), 0);
-    
-    const netChange = totalIn - totalOut;
-    const uniqueProducts = new Set(movements.map(m => m.product_id)).size;
-    const avgPerDay = movements.length / 7; // Assuming 7-day period
-    
-    return { 
-      totalIn, 
-      totalOut, 
-      netChange, 
-      uniqueProducts, 
-      count: movements.length,
-      avgPerDay: Math.round(avgPerDay)
-    };
-  }, [movements]);
+  // ── Filters ──────────────────────────────────────────────────────────────
 
-  const topProducts = useMemo(() => {
-    const productMap = new Map();
-    
-    movements.forEach(m => {
-      const productName = m.product?.name || m.product_name || 'Inconnu';
-      const current = productMap.get(productName) || { in: 0, out: 0 };
-      
-      if (m.movement_type === 'in') {
-        current.in += Number(m.quantity) || 0;
-      } else {
-        current.out += Number(m.quantity) || 0;
-      }
-      
-      productMap.set(productName, current);
-    });
-    
-    return Array.from(productMap.entries())
-      .map(([name, data]) => ({
-        name,
-        totalIn: data.in,
-        totalOut: data.out,
-        netChange: data.in - data.out
-      }))
-      .sort((a, b) => Math.abs(b.netChange) - Math.abs(a.netChange))
-      .slice(0, 5);
-  }, [movements]);
-
-  const generateReport = async () => {
-    if (movements.length === 0) {
-      toast.error('Aucune donnée à exporter');
-      return;
+  const filtered = useMemo(() => {
+    let list = [...rapports];
+    if (filterType !== 'all') list = list.filter(r => r.type_rapport === filterType);
+    if (filterFmt  !== 'all') list = list.filter(r => (r.format_rapport || '').startsWith(filterFmt));
+    if (filterStart) list = list.filter(r => new Date(r.created_at) >= new Date(filterStart));
+    if (filterEnd)   list = list.filter(r => new Date(r.created_at) <= new Date(filterEnd + 'T23:59:59'));
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(r =>
+        (r.user_name || '').toLowerCase().includes(q) ||
+        (r.type_rapport || '').includes(q) ||
+        (r.format_rapport || '').includes(q)
+      );
     }
+    return list;
+  }, [rapports, filterType, filterFmt, filterStart, filterEnd, search]);
 
-    setGenerating(true);
-    
+  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
+  const page = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
+  // ── Stats ────────────────────────────────────────────────────────────────
+
+  const stats = useMemo(() => {
+    const now = new Date();
+    const thisMonth = rapports.filter(r => {
+      const d = new Date(r.created_at);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    });
+    const lastRapport = rapports[0];
+    const formats = rapports.reduce((acc, r) => {
+      const f = r.format_rapport || 'inconnu';
+      acc[f] = (acc[f] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    const topFmt = (Object.entries(formats) as [string, number][]).sort((a, b) => b[1] - a[1])[0];
+    return { total: rapports.length, thisMonth: thisMonth.length, lastRapport, topFmt };
+  }, [rapports]);
+
+  // ── Actions ──────────────────────────────────────────────────────────────
+
+  const sendDailyReport = async () => {
+    setDailySending(true);
     try {
-      // persist report record in DB
-      try {
-        const formatMap: Record<string,string> = { excel: 'xls', pdf: 'pdf', csv: 'csv', png: 'png', print: 'pdf' };
-        const payload = {
-          type_rapport: getTypeFromPeriod(period),
-          format_rapport: formatMap[format] || 'pdf',
-          parameters: { start: startDate, end: endDate }
-        };
-        const resp = await apiFetch('/api/admin/rapports', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (resp.ok) {
-          const body = await resp.json().catch(() => ({}));
-          if (body?.download) {
-            toast.success('Rapport enregistré sur le serveur (fichier disponible)');
-          } else {
-            toast.success('Rapport enregistré dans la base');
-          }
-        } else {
-          // don't block generation if persistence fails
-          const err = await resp.json().catch(() => ({}));
-          console.warn('Rapport persistence failed', err);
-        }
-      } catch (e) {
-        console.warn('Failed to persist report', e);
+      const resp = await apiFetch('/api/admin/rapport-journalier/envoyer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: dailyDate }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || 'Erreur serveur');
       }
-
-      switch(format) {
-        case 'pdf':
-          await exportPDF();
-          break;
-        case 'excel':
-          exportExcel();
-          break;
-        case 'csv':
-          exportCSV();
-          break;
-        case 'png':
-          await exportImage('png');
-          break;
-        case 'print':
-          exportPrint();
-          break;
-      }
-      
-      if (emailReport && emailAddress) {
-        toast.info('Envoi par email en cours...');
-        // Simulate email sending
-        setTimeout(() => {
-          toast.success(`Rapport envoyé à ${emailAddress}`);
-        }, 1500);
-      }
-    } catch (error) {
-      toast.error('Erreur lors de la génération du rapport');
-      console.error(error);
+      toast.success('Rapport journalier envoyé par email !', {
+        description: `Rapport du ${fmtDate(dailyDate)} envoyé avec succès`,
+      });
+      setDailyOpen(false);
+      fetchRapports();
+    } catch (e: any) {
+      toast.error('Échec de l\'envoi', { description: e?.message });
     } finally {
-      setGenerating(false);
+      setDailySending(false);
     }
   };
 
-  function getTypeFromPeriod(p: string) {
-    if (p === 'today' || p === 'yesterday') return 'journalier';
-    if (p === 'year') return 'annuelle';
-    return 'mensuelle';
-  }
-
-  const shareReport = async () => {
-    if (movements.length === 0) {
-      toast.error('Générez ou chargez des données avant de partager');
-      return;
-    }
+  const generateReport = async () => {
     setGenerating(true);
     try {
-      const formatMap: Record<string,string> = { excel: 'xls', pdf: 'pdf', csv: 'csv', png: 'png', print: 'pdf' };
-      const payload = {
-        type_rapport: getTypeFromPeriod(period),
-        format_rapport: formatMap[format] || 'pdf',
-        parameters: { start: startDate, end: endDate }
-      };
+      const params: any = {};
+      if (genType === 'journalier') {
+        params.start = genStart;
+        params.end   = genStart;
+      } else {
+        params.start = genStart;
+        params.end   = genEnd;
+      }
 
       const resp = await apiFetch('/api/admin/rapports', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          type_rapport:   genType,
+          format_rapport: genFmt,
+          parameters:     { ...params, sources: genSources },
+        }),
       });
-      // read body once and handle errors
-      const body = await resp.json().catch(() => ({}));
-      if (!resp.ok) {
-        throw new Error(body.error || 'Erreur création rapport');
+      if (!resp.ok) throw new Error();
+      const body = await resp.json();
+      const downloadUrl = body.download;
+
+      toast.success('Rapport généré avec succès !');
+
+      // Téléchargement via apiFetch pour inclure le token d'auth
+      if (downloadUrl) {
+        try {
+          const dlResp = await apiFetch(downloadUrl);
+          if (dlResp.ok) {
+            const blob = await dlResp.blob();
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href     = url;
+            a.download = body.data?.filename || 'rapport';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          }
+        } catch {
+          toast.warning('Le rapport a été généré mais le téléchargement automatique a échoué. Cherchez-le dans l\'historique.');
+        }
       }
 
-      // server may return different keys (download, filePath, filename)
-      let downloadPath = body.download || body.filePath || body.path || body.filename;
-      if (!downloadPath && body.filename) downloadPath = `/exports/${body.filename}`;
-
-      if (!downloadPath) {
-        toast.error('Rapport créé mais pas de fichier disponible pour le partage');
-        return;
-      }
-
-      // normalize to full URL
-      const fullUrl = /^https?:\/\//i.test(downloadPath)
-        ? downloadPath
-        : `${window.location.origin}${downloadPath.startsWith('/') ? downloadPath : '/' + downloadPath}`;
-
-      const phone = '221774220320';
-      const startStr = startDate ? new Date(startDate).toLocaleDateString() : '';
-      const endStr = endDate ? new Date(endDate).toLocaleDateString() : '';
-      const message = `Bonjour,\nVoici le rapport "${reportTitle}" pour la période ${startStr} - ${endStr} :\n${fullUrl}`;
-      const wa = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-      window.open(wa, '_blank', 'noopener');
-      toast.success('Ouverture de WhatsApp pour partager le rapport');
-    } catch (e) {
-      console.error(e);
-      toast.error('Impossible de partager le rapport');
+      setGenOpen(false);
+      fetchRapports();
+    } catch {
+      toast.error('Erreur lors de la génération du rapport');
     } finally {
       setGenerating(false);
     }
   };
 
-  const exportPDF = async () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      toast.error('Impossible d\'ouvrir la fenêtre d\'impression');
+  const downloadRapport = async (rapport: any) => {
+    if (!rapport.filename) {
+      toast.error('Aucun fichier disponible pour ce rapport');
       return;
     }
-
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <title>${reportTitle}</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
-            .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #3b82f6; padding-bottom: 20px; }
-            .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 30px 0; }
-            .summary-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; text-align: center; }
-            .summary-value { font-size: 24px; font-weight: bold; margin: 10px 0; }
-            table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-            th { background: #3b82f6; color: white; padding: 12px; text-align: left; }
-            td { padding: 10px; border-bottom: 1px solid #e2e8f0; }
-            .footer { margin-top: 40px; text-align: center; color: #64748b; font-size: 12px; }
-            .positive { color: #10b981; }
-            .negative { color: #ef4444; }
-          </style>
-        </head>
-        <body>
-              <div class="header" style="display:flex;align-items:center;gap:20px;justify-content:center;flex-direction:column;">
-                <img src="/assets/logo_realtech.png" alt="logo" style="height:72px;object-fit:contain;margin-bottom:6px" />
-                <h1>${reportTitle}</h1>
-                <p>Période: ${new Date(startDate!).toLocaleDateString()} - ${new Date(endDate!).toLocaleDateString()}</p>
-                <p>Généré le: ${new Date().toLocaleString()}</p>
-              </div>
-          
-          ${includeSummary ? `
-            <div class="summary">
-              <div class="summary-card">
-                <div>Total Entrées</div>
-                <div class="summary-value">${reportSummary.totalIn}</div>
-              </div>
-              <div class="summary-card">
-                <div>Total Sorties</div>
-                <div class="summary-value">${reportSummary.totalOut}</div>
-              </div>
-              <div class="summary-card">
-                <div>Variation Nette</div>
-                <div class="summary-value ${reportSummary.netChange >= 0 ? 'positive' : 'negative'}">
-                  ${reportSummary.netChange >= 0 ? '+' : ''}${reportSummary.netChange}
-                </div>
-              </div>
-              <div class="summary-card">
-                <div>Produits Actifs</div>
-                <div class="summary-value">${reportSummary.uniqueProducts}</div>
-              </div>
-            </div>
-          ` : ''}
-          
-          <h2>Top 5 Produits</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Produit</th>
-                <th>Entrées</th>
-                <th>Sorties</th>
-                <th>Variation</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${topProducts.map(p => `
-                <tr>
-                  <td>${p.name}</td>
-                  <td>${p.totalIn}</td>
-                  <td>${p.totalOut}</td>
-                  <td class="${p.netChange >= 0 ? 'positive' : 'negative'}">
-                    ${p.netChange >= 0 ? '+' : ''}${p.netChange}
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-          
-          <h2>Détail des Mouvements</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Produit</th>
-                <th>Type</th>
-                <th>Sous-type</th>
-                <th>Quantité</th>
-                <th>Référence</th>
-                <th>Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${movements.map(m => `
-                <tr>
-                  <td>${m.product?.name || m.product_name || '-'}</td>
-                  <td>${m.movement_type}</td>
-                  <td>${m.movement_subtype}</td>
-                  <td>${m.quantity}</td>
-                  <td>${m.reference || '-'}</td>
-                  <td>${new Date(m.created_at).toLocaleDateString()}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-          
-          <div class="footer">
-            <p>Rapport généré automatiquement - Système de Gestion de Stock</p>
-          </div>
-        </body>
-      </html>
-    `;
-
-    printWindow.document.write(html);
-    printWindow.document.close();
-    
-    setTimeout(() => {
-      printWindow.print();
-      toast.success('Rapport PDF généré');
-    }, 500);
-  };
-
-  const exportExcel = () => {
-    const headers = [
-      'ID', 'Produit', 'Type', 'Sous-type', 'Quantité', 
-      'Coût Unitaire', 'Référence', 'Date', 'Statut', 'Créé par'
-    ];
-    
-    const rows = movements.map(m => [
-      m.id,
-      m.product?.name || m.product_name || '',
-      m.movement_type,
-      m.movement_subtype,
-      m.quantity,
-      m.unit_cost || '',
-      m.reference || '',
-      new Date(m.created_at).toLocaleString(),
-      m.status,
-      m.created_by_name || m.created_by || ''
-    ]);
-
-    // Create CSV with Excel BOM for UTF-8
-    const csvContent = '\uFEFF' + [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => 
-        `"${String(cell).replace(/"/g, '""')}"`
-      ).join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { 
-      type: 'text/csv;charset=utf-8;' 
-    });
-    
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${reportTitle.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.xls`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    toast.success('Fichier Excel généré');
-  };
-
-  const exportCSV = () => {
-    const headers = [
-      'Produit', 'Type', 'Sous-type', 'Quantité', 
-      'Référence', 'Date', 'Statut'
-    ];
-    
-    const rows = movements.map(m => [
-      m.product?.name || m.product_name || '',
-      m.movement_type,
-      m.movement_subtype,
-      m.quantity,
-      m.reference || '',
-      new Date(m.created_at).toISOString(),
-      m.status
-    ]);
-
-    const csvContent = [
-      headers.join(';'),
-      ...rows.map(row => row.map(cell => 
-        `"${String(cell).replace(/"/g, '""')}"`
-      ).join(';'))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { 
-      type: 'text/csv;charset=utf-8;' 
-    });
-    
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${reportTitle.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    toast.success('Fichier CSV généré');
-  };
-
-  const exportImage = async (type: 'png' | 'jpg') => {
     try {
-      toast.info('Génération d\'image en cours...');
-      if (!(window as any).html2canvas) {
-        await new Promise((res, rej) => {
-          const s = document.createElement('script');
-          s.src = 'https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js';
-          s.onload = res; s.onerror = rej; document.head.appendChild(s);
-        });
+      const resp = await apiFetch(`/api/admin/rapports/download/${rapport.filename}`);
+      if (!resp.ok) {
+        if (resp.status === 404) {
+          toast.error('Fichier introuvable sur le serveur', {
+            description: 'Il a peut-être été supprimé ou déplacé.',
+          });
+        } else {
+          toast.error(`Erreur ${resp.status} lors du téléchargement`);
+        }
+        return;
       }
-      const html2canvas = (window as any).html2canvas;
-      // build container with same content as PDF header + table
-      const container = document.createElement('div');
-      container.style.padding = '20px';
-      container.style.background = '#fff';
-      container.style.color = '#333';
-      container.style.maxWidth = '1200px';
-      container.style.fontFamily = 'Arial, sans-serif';
-      const headerHtml = `
-        <div style="text-align:center;margin-bottom:12px">
-          <img src="/assets/logo_realtech.png" alt="logo" style="height:72px;object-fit:contain;margin-bottom:6px" />
-          <h2 style="margin:0">${reportTitle}</h2>
-          <div style="font-size:12px;color:#666">Période: ${new Date(startDate!).toLocaleDateString()} - ${new Date(endDate!).toLocaleDateString()}</div>
-        </div>
-      `;
-      const tableRows = movements.map(m => `
-        <tr>
-          <td style="padding:8px;border:1px solid #ddd">${m.product?.name||m.product_name||''}</td>
-          <td style="padding:8px;border:1px solid #ddd">${m.movement_type}</td>
-          <td style="padding:8px;border:1px solid #ddd">${m.movement_subtype}</td>
-          <td style="padding:8px;border:1px solid #ddd">${m.quantity}</td>
-          <td style="padding:8px;border:1px solid #ddd">${m.reference||''}</td>
-          <td style="padding:8px;border:1px solid #ddd">${new Date(m.created_at).toLocaleString()}</td>
-        </tr>
-      `).join('');
-      const tableHtml = `
-        <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px">
-          <thead>
-            <tr>
-              <th style="padding:8px;border:1px solid #ddd;background:#f3f4f6">Produit</th>
-              <th style="padding:8px;border:1px solid #ddd;background:#f3f4f6">Type</th>
-              <th style="padding:8px;border:1px solid #ddd;background:#f3f4f6">Sous-type</th>
-              <th style="padding:8px;border:1px solid #ddd;background:#f3f4f6">Quantité</th>
-              <th style="padding:8px;border:1px solid #ddd;background:#f3f4f6">Référence</th>
-              <th style="padding:8px;border:1px solid #ddd;background:#f3f4f6">Date</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${tableRows}
-          </tbody>
-        </table>
-      `;
-      container.innerHTML = headerHtml + tableHtml;
-      document.body.appendChild(container);
-      const canvas = await html2canvas(container, { scale: 2, useCORS: true });
-      document.body.removeChild(container);
-      canvas.toBlob((blob: Blob | null) => {
-        if (!blob) { toast.error('Échec génération image'); return; }
-        const ext = type === 'png' ? 'png' : 'jpg';
-        const filename = `rapport_${(new Date()).toISOString().slice(0,10)}.${ext}`;
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast.success(`Image ${type.toUpperCase()} générée`);
-      }, type === 'png' ? 'image/png' : 'image/jpeg', type === 'jpg' ? 0.9 : undefined);
-    } catch (error) {
-      toast.error('Erreur lors de la génération de l\'image');
-      console.error(error);
+      const blob = await resp.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = rapport.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success('Téléchargement démarré', { description: rapport.filename });
+    } catch {
+      toast.error('Impossible de télécharger le fichier');
     }
   };
 
-  const exportPrint = () => {
-    exportPDF();
+  // Quick CSV export of the current filtered list
+  const exportListCSV = () => {
+    if (filtered.length === 0) { toast.error('Aucun rapport à exporter'); return; }
+    const rows = [
+      ['Date', 'Type', 'Format', 'Période', 'Lignes', 'Généré par', 'Fichier'],
+      ...filtered.map(r => [
+        fmtDate(r.created_at, true),
+        TYPE_LABELS[r.type_rapport]?.label || r.type_rapport || '—',
+        (FORMAT_LABELS[r.format_rapport]?.label || r.format_rapport || '—'),
+        periodFromParams(r.parameters),
+        r.rows_count ?? '—',
+        r.user_name || 'Système',
+        r.filename || '—',
+      ]),
+    ];
+    downloadCSV(rows, `historique_rapports_${todayISO()}.csv`);
+    toast.success(`${filtered.length} lignes exportées`);
   };
 
-  const loadSampleData = () => {
-    setLoading(true);
-    setTimeout(() => {
-      // Simulate API call
-      const sampleData = Array.from({ length: 15 }, (_, i) => ({
-        id: `sample-${i}`,
-        product: { name: `Produit ${i + 1}` },
-        product_name: `Produit ${i + 1}`,
-        movement_type: i % 3 === 0 ? 'in' : 'out',
-        movement_subtype: i % 2 === 0 ? 'livraison' : 'commande',
-        quantity: Math.floor(Math.random() * 100) + 1,
-        reference: `REF-${1000 + i}`,
-        created_at: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
-        status: 'active',
-        created_by: `Utilisateur ${i % 3 + 1}`
-      }));
-      
-      setMovements(sampleData);
-      toast.success('Données exemple chargées');
-      setLoading(false);
-    }, 1000);
+  const resetFilters = () => {
+    setSearch(''); setFilterType('all'); setFilterFmt('all');
+    setFilterStart(''); setFilterEnd(''); setCurrentPage(1);
   };
 
-  const ColumnSelector = () => (
-    <Dialog>
-      <Button variant="outline" size="sm" className="gap-2">
-        <Settings className="h-4 w-4" />
-        Colonnes
-        <ChevronDown className="h-4 w-4" />
-      </Button>
-    </Dialog>
-  );
+  const hasFilters = search || filterType !== 'all' || filterFmt !== 'all' || filterStart || filterEnd;
+
+  // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="p-6 space-y-6 bg-gradient-to-br from-gray-50 to-blue-50 min-h-screen">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Générateur de Rapports</h1>
-          <p className="text-gray-600 mt-1">
-            Créez et exportez des rapports détaillés sur vos mouvements de stock
-          </p>
+    <div className="space-y-6 p-4">
+
+      {/* ── Header ── */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0">
+            <FileBarChart2 className="h-6 w-6 text-white" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">Rapports & Exports</h1>
+            <p className="text-muted-foreground mt-0.5">
+              Historique des rapports générés, envoi manuel et exports personnalisés
+            </p>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button 
-            variant="outline" 
-            onClick={loadSampleData}
-            className="gap-2"
-          >
-            <Eye className="h-4 w-4" />
-            Données Exemple
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={fetchRapports} disabled={loading}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Actualiser
           </Button>
-          <Button 
-            onClick={() => setShowPreview(!showPreview)}
-            className="gap-2"
-          >
-            <Eye className="h-4 w-4" />
-            {showPreview ? 'Masquer l\'aperçu' : 'Aperçu'}
+          <Button variant="outline" size="sm" onClick={exportListCSV} disabled={filtered.length === 0}>
+            <Download className="mr-2 h-4 w-4" />
+            Exporter liste
+          </Button>
+          <Button variant="outline" onClick={() => setGenOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Rapport personnalisé
+          </Button>
+          <Button onClick={() => setDailyOpen(true)} className="bg-emerald-600 hover:bg-emerald-700">
+            <Send className="mr-2 h-4 w-4" />
+            Rapport journalier
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Left Sidebar - Configuration */}
-        <div className="lg:col-span-1 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Settings className="h-5 w-5" />
-                Configuration
-              </CardTitle>
-              <CardDescription>Paramètres du rapport</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Titre du Rapport</Label>
-                <Input 
-                  value={reportTitle}
-                  onChange={(e) => setReportTitle(e.target.value)}
-                  placeholder="Entrez le titre du rapport"
+      {/* ── Stats ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="pt-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground font-medium">Total rapports</p>
+                <p className="text-3xl font-bold mt-1">{stats.total}</p>
+                <p className="text-xs text-muted-foreground mt-1">Tous types confondus</p>
+              </div>
+              <div className="w-11 h-11 rounded-lg bg-violet-100 flex items-center justify-center">
+                <FileBarChart2 className="h-5 w-5 text-violet-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground font-medium">Ce mois-ci</p>
+                <p className="text-3xl font-bold mt-1 text-indigo-600">{stats.thisMonth}</p>
+                <p className="text-xs text-muted-foreground mt-1">Rapports générés</p>
+              </div>
+              <div className="w-11 h-11 rounded-lg bg-indigo-100 flex items-center justify-center">
+                <Calendar className="h-5 w-5 text-indigo-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground font-medium">Dernier rapport</p>
+                <p className="text-base font-bold mt-1 leading-tight">
+                  {stats.lastRapport ? fmtDate(stats.lastRapport.created_at) : '—'}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {stats.lastRapport
+                    ? (TYPE_LABELS[stats.lastRapport.type_rapport]?.label || stats.lastRapport.type_rapport)
+                    : 'Aucun rapport'}
+                </p>
+              </div>
+              <div className="w-11 h-11 rounded-lg bg-blue-100 flex items-center justify-center">
+                <Clock className="h-5 w-5 text-blue-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground font-medium">Format principal</p>
+                <p className="text-3xl font-bold mt-1 text-emerald-600 uppercase">
+                  {stats.topFmt ? FORMAT_LABELS[stats.topFmt[0]]?.label || stats.topFmt[0] : '—'}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {stats.topFmt ? `${stats.topFmt[1]} rapport${stats.topFmt[1] > 1 ? 's' : ''}` : ''}
+                </p>
+              </div>
+              <div className="w-11 h-11 rounded-lg bg-emerald-100 flex items-center justify-center">
+                <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ── Filters ── */}
+      <Card>
+        <CardContent className="pt-5">
+          <div className="flex flex-col md:flex-row gap-3 flex-wrap">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Rechercher par utilisateur, type..."
+                value={search}
+                onChange={e => { setSearch(e.target.value); setCurrentPage(1); }}
+                className="pl-10"
+              />
+            </div>
+
+            <Select value={filterType} onValueChange={v => { setFilterType(v); setCurrentPage(1); }}>
+              <SelectTrigger className="w-[170px]">
+                <Layers className="mr-2 h-4 w-4 text-muted-foreground" />
+                <SelectValue placeholder="Type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous les types</SelectItem>
+                <SelectItem value="journalier">Journalier</SelectItem>
+                <SelectItem value="mensuelle">Mensuel</SelectItem>
+                <SelectItem value="annuelle">Annuel</SelectItem>
+                <SelectItem value="personnalise">Personnalisé</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={filterFmt} onValueChange={v => { setFilterFmt(v); setCurrentPage(1); }}>
+              <SelectTrigger className="w-[150px]">
+                <Filter className="mr-2 h-4 w-4 text-muted-foreground" />
+                <SelectValue placeholder="Format" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous formats</SelectItem>
+                <SelectItem value="xls">XLSX</SelectItem>
+                <SelectItem value="csv">CSV</SelectItem>
+                <SelectItem value="pdf">PDF</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="date"
+                  value={filterStart}
+                  onChange={e => { setFilterStart(e.target.value); setCurrentPage(1); }}
+                  className="pl-10 w-[155px]"
+                  title="Date début"
                 />
               </div>
+              <span className="text-muted-foreground text-sm">→</span>
+              <Input
+                type="date"
+                value={filterEnd}
+                onChange={e => { setFilterEnd(e.target.value); setCurrentPage(1); }}
+                className="w-[145px]"
+                title="Date fin"
+              />
+            </div>
 
-              <div className="space-y-2">
-                <Label>Type de Rapport</Label>
-                <Select value={reportType} onValueChange={setReportType}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Sélectionnez un type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {reportTypes.map(type => (
-                      <SelectItem key={type.value} value={type.value}>
-                        <div className="flex flex-col">
-                          <span>{type.label}</span>
-                          <span className="text-xs text-gray-500">{type.description}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Période</Label>
-                <Select value={period} onValueChange={setPeriod}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {periodOptions.map(option => {
-                      const Icon = option.icon;
-                      return (
-                        <SelectItem key={option.value} value={option.value}>
-                          <div className="flex items-center gap-2">
-                            <Icon className="h-4 w-4" />
-                            {option.label}
-                          </div>
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-              </div>
-
-                  {period === 'custom' && (
-                <div className="space-y-2">
-                  <Label>Plage de dates personnalisée</Label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div>
-                      <Label>Début</Label>
-                      <Input type="datetime-local" value={startDate ? new Date(startDate).toISOString().slice(0,16) : ''} onChange={(e) => setStartDate(e.target.value ? new Date(e.target.value).toISOString() : null)} />
-                    </div>
-                    <div>
-                      <Label>Fin</Label>
-                      <Input type="datetime-local" value={endDate ? new Date(endDate).toISOString().slice(0,16) : ''} onChange={(e) => setEndDate(e.target.value ? new Date(e.target.value).toISOString() : null)} />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <Label>Format d'export</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {formatOptions.map(option => {
-                    const Icon = option.icon;
-                    return (
-                      <Button
-                        key={option.value}
-                        variant={format === option.value ? "default" : "outline"}
-                        className={`justify-start ${format === option.value ? option.color : ''}`}
-                        onClick={() => setFormat(option.value)}
-                      >
-                        <Icon className="h-4 w-4 mr-2" />
-                        {option.label}
-                      </Button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="space-y-3 pt-4">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="include-summary" className="cursor-pointer">
-                    Inclure le résumé
-                  </Label>
-                  <Switch
-                    id="include-summary"
-                    checked={includeSummary}
-                    onCheckedChange={setIncludeSummary}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="include-charts" className="cursor-pointer">
-                    Inclure les graphiques
-                  </Label>
-                  <Switch
-                    id="include-charts"
-                    checked={includeCharts}
-                    onCheckedChange={setIncludeCharts}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="email-report" className="cursor-pointer">
-                    Envoyer par email
-                  </Label>
-                  <Switch
-                    id="email-report"
-                    checked={emailReport}
-                    onCheckedChange={setEmailReport}
-                  />
-                </div>
-              </div>
-
-              {emailReport && (
-                <div className="space-y-2 pt-2">
-                  <Label>Adresse email</Label>
-                  <Input
-                    type="email"
-                    value={emailAddress}
-                    onChange={(e) => setEmailAddress(e.target.value)}
-                    placeholder="email@exemple.com"
-                  />
-                </div>
-              )}
-
-              <div className="pt-4 space-y-2">
-                <Button 
-                  onClick={fetchReportData}
-                  className="w-full gap-2"
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      Chargement...
-                    </>
-                  ) : (
-                    <>
-                      <Filter className="h-4 w-4" />
-                      Charger les données
-                    </>
-                  )}
-                </Button>
-
-                <Button 
-                  onClick={generateReport}
-                  className="w-full gap-2 bg-blue-600 hover:bg-blue-700"
-                  disabled={generating || movements.length === 0}
-                >
-                  {generating ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      Génération...
-                    </>
-                  ) : (
-                    <>
-                      <Download className="h-4 w-4" />
-                      Générer le rapport
-                    </>
-                  )}
-                </Button>
-                <Button
-                  onClick={shareReport}
-                  className="w-full gap-2 mt-2"
-                  disabled={generating || movements.length === 0}
-                >
-                  Partager (WhatsApp)
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Quick Stats */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium text-gray-600">
-                Statistiques Rapides
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Données chargées</span>
-                <Badge variant={movements.length > 0 ? "success" : "secondary"}>
-                  {movements.length} lignes
-                </Badge>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Période</span>
-                <span className="text-sm font-medium">
-                  {startDate ? new Date(startDate).toLocaleDateString() : '-'} 
-                  {' → '}
-                  {endDate ? new Date(endDate).toLocaleDateString() : '-'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Format sélectionné</span>
-                <Badge variant="outline" className="font-mono">
-                  {format.toUpperCase()}
-                </Badge>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Main Content */}
-        <div className="lg:col-span-3 space-y-6">
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Total Entrées</p>
-                    <h3 className="text-2xl font-bold mt-2 text-green-600">
-                      {reportSummary.totalIn}
-                    </h3>
-                  </div>
-                  <div className="p-3 bg-green-50 rounded-full">
-                    <TrendingUp className="h-6 w-6 text-green-600" />
-                  </div>
-                </div>
-                <p className="text-xs text-gray-500 mt-2">Quantité totale entrante</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Total Sorties</p>
-                    <h3 className="text-2xl font-bold mt-2 text-red-600">
-                      {reportSummary.totalOut}
-                    </h3>
-                  </div>
-                  <div className="p-3 bg-red-50 rounded-full">
-                    <TrendingUp className="h-6 w-6 text-red-600" />
-                  </div>
-                </div>
-                <p className="text-xs text-gray-500 mt-2">Quantité totale sortante</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Variation Nette</p>
-                    <h3 className={`text-2xl font-bold mt-2 ${
-                      reportSummary.netChange >= 0 ? 'text-green-600' : 'text-red-600'
-                    }`}>
-                      {reportSummary.netChange >= 0 ? '+' : ''}{reportSummary.netChange}
-                    </h3>
-                  </div>
-                  <div className="p-3 bg-blue-50 rounded-full">
-                    <BarChart className="h-6 w-6 text-blue-600" />
-                  </div>
-                </div>
-                <p className="text-xs text-gray-500 mt-2">Balance stock</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Produits Actifs</p>
-                    <h3 className="text-2xl font-bold mt-2 text-purple-600">
-                      {reportSummary.uniqueProducts}
-                    </h3>
-                  </div>
-                  <div className="p-3 bg-purple-50 rounded-full">
-                    <Package className="h-6 w-6 text-purple-600" />
-                  </div>
-                </div>
-                <p className="text-xs text-gray-500 mt-2">Avec mouvements</p>
-              </CardContent>
-            </Card>
+            {hasFilters && (
+              <Button variant="ghost" size="sm" onClick={resetFilters}>
+                Réinitialiser
+              </Button>
+            )}
           </div>
+        </CardContent>
+      </Card>
 
-          {/* Data Preview */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Aperçu des Données</CardTitle>
-                  <CardDescription>
-                    {movements.length} mouvements trouvés
-                    {startDate && endDate && (
-                      <span className="ml-2">
-                        ({new Date(startDate).toLocaleDateString()} - {new Date(endDate).toLocaleDateString()})
-                      </span>
-                    )}
-                  </CardDescription>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setMovements([])}
-                  >
-                    Effacer
-                  </Button>
-                  <ColumnSelector />
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <div className="space-y-3">
-                  {[...Array(5)].map((_, i) => (
-                    <Skeleton key={i} className="h-12 w-full" />
-                  ))}
-                </div>
-              ) : movements.length === 0 ? (
-                <div className="text-center py-12">
-                  <div className="mx-auto w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-4">
-                    <FileText className="h-6 w-6 text-gray-400" />
+      {/* ── Table ── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Historique des rapports</CardTitle>
+              <CardDescription>
+                {filtered.length} rapport{filtered.length !== 1 ? 's' : ''} trouvé{filtered.length !== 1 ? 's' : ''}
+                {hasFilters && ' (filtrés)'}
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="space-y-3">
+              {[...Array(6)].map((_, i) => (
+                <div key={i} className="flex items-center gap-4">
+                  <Skeleton className="h-10 w-10 rounded-lg" />
+                  <div className="flex-1 space-y-1.5">
+                    <Skeleton className="h-4 w-1/3" />
+                    <Skeleton className="h-3 w-1/4" />
                   </div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                    Aucune donnée
-                  </h3>
-                  <p className="text-gray-600 max-w-sm mx-auto mb-6">
-                    Chargez des données pour visualiser et générer des rapports
-                  </p>
-                  <Button onClick={loadSampleData} variant="outline">
-                    Charger des données exemple
-                  </Button>
+                  <Skeleton className="h-6 w-20 rounded-full" />
+                  <Skeleton className="h-8 w-24 rounded-md" />
                 </div>
-              ) : (
-                <div className="rounded-md border overflow-x-auto">
-                  <Table className="min-w-[720px]">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Produit</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Quantité</TableHead>
-                        <TableHead>Référence</TableHead>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Statut</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {movements.slice(0, 10).map((m, i) => (
-                        <TableRow key={m.id || i}>
-                          <TableCell className="font-medium">
-                            {m.product?.name || m.product_name || '-'}
-                          </TableCell>
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-16">
+              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+                <FileClock className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <h3 className="font-medium text-lg mb-1">Aucun rapport trouvé</h3>
+              <p className="text-muted-foreground text-sm mb-6">
+                {hasFilters
+                  ? 'Essayez de modifier vos filtres'
+                  : 'Aucun rapport généré pour le moment. Cliquez sur "Rapport journalier" pour commencer.'}
+              </p>
+              {!hasFilters && (
+                <Button onClick={() => setDailyOpen(true)} className="bg-emerald-600 hover:bg-emerald-700">
+                  <Send className="mr-2 h-4 w-4" />
+                  Envoyer le rapport journalier
+                </Button>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="rounded-md border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead>Date & heure</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Format</TableHead>
+                      <TableHead>Période couverte</TableHead>
+                      <TableHead className="text-center">Lignes</TableHead>
+                      <TableHead>Généré par</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {page.map(r => {
+                      const typeInfo   = TYPE_LABELS[r.type_rapport]   || { label: r.type_rapport || '—', color: 'bg-gray-100 text-gray-700' };
+                      const fmtInfo    = FORMAT_LABELS[r.format_rapport] || { label: r.format_rapport || '—', color: 'bg-gray-100 text-gray-700', icon: FileText };
+                      const FmtIcon    = fmtInfo.icon;
+                      const hasFile    = Boolean(r.filename);
+
+                      return (
+                        <TableRow key={r.id} className="hover:bg-muted/30">
                           <TableCell>
-                            <Badge
-                              variant={m.movement_type === 'in' ? 'success' : 'destructive'}
-                              className={
-                                m.movement_type === 'in' 
-                                  ? 'bg-green-100 text-green-800 hover:bg-green-100' 
-                                  : 'bg-red-100 text-red-800 hover:bg-red-100'
-                              }
-                            >
-                              {m.movement_type === 'in' ? 'Entrée' : 'Sortie'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{m.quantity}</span>
-                              {m.unit_cost && (
-                                <span className="text-xs text-gray-500">
-                                  ({m.unit_cost} €/u)
-                                </span>
-                              )}
+                            <div className="font-medium text-sm">
+                              {fmtDate(r.created_at)}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {format(new Date(r.created_at), 'HH:mm', { locale: fr })}
                             </div>
                           </TableCell>
-                          <TableCell className="text-gray-600">
-                            {m.reference || '-'}
-                          </TableCell>
-                          <TableCell className="text-gray-600">
-                            {new Date(m.created_at).toLocaleDateString()}
-                          </TableCell>
+
                           <TableCell>
-                            <Badge
-                              variant={m.status === 'active' ? 'outline' : 'secondary'}
-                              className={
-                                m.status === 'active' 
-                                  ? 'border-green-200 text-green-700' 
-                                  : 'border-gray-200 text-gray-700'
-                              }
+                            <span className={`inline-flex items-center gap-1 text-xs font-semibold rounded-full px-2.5 py-1 ${typeInfo.color}`}>
+                              <BarChart3 className="h-3 w-3" />
+                              {typeInfo.label}
+                            </span>
+                          </TableCell>
+
+                          <TableCell>
+                            <span className={`inline-flex items-center gap-1 text-xs font-semibold rounded-full px-2.5 py-1 ${fmtInfo.color}`}>
+                              <FmtIcon className="h-3 w-3" />
+                              {fmtInfo.label}
+                            </span>
+                          </TableCell>
+
+                          <TableCell>
+                            <span className="text-sm text-muted-foreground font-mono text-xs">
+                              {periodFromParams(
+                                typeof r.parameters === 'string'
+                                  ? JSON.parse(r.parameters)
+                                  : r.parameters
+                              )}
+                            </span>
+                          </TableCell>
+
+                          <TableCell className="text-center">
+                            {r.rows_count != null ? (
+                              <span className="font-semibold">{r.rows_count.toLocaleString()}</span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+
+                          <TableCell>
+                            <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                              <User className="h-3.5 w-3.5 shrink-0" />
+                              <span className="truncate max-w-[120px]">
+                                {r.user_name || 'Système (auto)'}
+                              </span>
+                            </div>
+                          </TableCell>
+
+                          <TableCell className="text-right">
+                            <Button
+                              variant={hasFile ? 'outline' : 'ghost'}
+                              size="sm"
+                              disabled={!hasFile}
+                              onClick={() => downloadRapport(r)}
+                              title={hasFile ? 'Télécharger le fichier' : 'Fichier non disponible'}
                             >
-                              {m.status === 'active' ? 'Actif' : m.status}
-                            </Badge>
+                              <Download className="h-4 w-4 mr-1" />
+                              {hasFile ? 'Télécharger' : 'Indisponible'}
+                            </Button>
                           </TableCell>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  
-                  {movements.length > 10 && (
-                    <div className="p-4 border-t text-center">
-                      <p className="text-sm text-gray-600">
-                        + {movements.length - 10} autres mouvements non affichés
-                      </p>
-                    </div>
-                  )}
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between pt-4">
+                  <p className="text-sm text-muted-foreground">
+                    {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filtered.length)} sur {filtered.length}
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      let n = i + 1;
+                      if (totalPages > 5) {
+                        if (currentPage <= 3) n = i + 1;
+                        else if (currentPage >= totalPages - 2) n = totalPages - 4 + i;
+                        else n = currentPage - 2 + i;
+                      }
+                      return (
+                        <Button key={n} variant={currentPage === n ? 'default' : 'outline'} size="sm" className="w-8 h-8 p-0" onClick={() => setCurrentPage(n)}>
+                          {n}
+                        </Button>
+                      );
+                    })}
+                    <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               )}
-            </CardContent>
-          </Card>
-
-          {/* Top Products */}
-          {topProducts.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Top 5 Produits</CardTitle>
-                <CardDescription>Produits avec le plus d'activité</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {topProducts.map((product, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                          <Package className="h-4 w-4 text-blue-600" />
-                        </div>
-                        <div>
-                          <p className="font-medium">{product.name}</p>
-                          <div className="flex gap-4 text-sm text-gray-600">
-                            <span>Entrées: {product.totalIn}</span>
-                            <span>Sorties: {product.totalOut}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className={`text-lg font-bold ${
-                        product.netChange >= 0 ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                        {product.netChange >= 0 ? '+' : ''}{product.netChange}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+            </>
           )}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Daily Report Dialog ── */}
+      <Dialog open={dailyOpen} onOpenChange={setDailyOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="h-5 w-5 text-emerald-600" />
+              Envoyer le rapport journalier
+            </DialogTitle>
+            <DialogDescription>
+              Génère et envoie le rapport Excel du jour par email (ventes + stock + dépenses).
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Destination info */}
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-emerald-50 border border-emerald-200">
+              <Mail className="h-5 w-5 text-emerald-600 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-emerald-800">Destinataire configuré</p>
+                <p className="text-xs text-emerald-700 mt-0.5">diankaseydou52@gmail.com</p>
+                <p className="text-xs text-emerald-600 mt-1">Le rapport automatique est aussi envoyé chaque soir à 22h00.</p>
+              </div>
+            </div>
+
+            {/* Date */}
+            <div className="space-y-1.5">
+              <Label>Date du rapport</Label>
+              <Input
+                type="date"
+                value={dailyDate}
+                max={todayISO()}
+                onChange={e => setDailyDate(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Le rapport inclura toutes les opérations de la journée sélectionnée.
+              </p>
+            </div>
+
+            {/* Content reminder */}
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { icon: ShoppingCart, label: 'Ventes', color: 'text-blue-600 bg-blue-50' },
+                { icon: Package,      label: 'Stock',  color: 'text-emerald-600 bg-emerald-50' },
+                { icon: TrendingDown, label: 'Dépenses', color: 'text-red-600 bg-red-50' },
+              ].map(({ icon: Icon, label, color }) => (
+                <div key={label} className={`flex flex-col items-center gap-1 p-2.5 rounded-lg ${color.split(' ')[1]} text-center`}>
+                  <Icon className={`h-5 w-5 ${color.split(' ')[0]}`} />
+                  <span className={`text-xs font-medium ${color.split(' ')[0]}`}>{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDailyOpen(false)}>Annuler</Button>
+            <Button
+              onClick={sendDailyReport}
+              disabled={dailySending || !dailyDate}
+              className="bg-emerald-600 hover:bg-emerald-700 min-w-36"
+            >
+              {dailySending ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Envoi en cours...</>
+              ) : (
+                <><Send className="mr-2 h-4 w-4" />Envoyer le rapport</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Generate Custom Report Dialog ── */}
+      <Dialog open={genOpen} onOpenChange={setGenOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus className="h-5 w-5 text-violet-600" />
+              Générer un rapport personnalisé
+            </DialogTitle>
+            <DialogDescription>
+              Choisissez la période, le contenu et le format du rapport à générer.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Type */}
+            <div className="space-y-1.5">
+              <Label>Type de rapport</Label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  { val: 'journalier',   label: 'Journalier' },
+                  { val: 'mensuelle',    label: 'Mensuel' },
+                  { val: 'annuelle',     label: 'Annuel' },
+                  { val: 'personnalise', label: 'Personnalisé' },
+                ].map(({ val, label }) => (
+                  <button
+                    key={val}
+                    onClick={() => setGenType(val)}
+                    className={`py-2 px-3 rounded-lg border-2 text-sm font-medium transition-all ${
+                      genType === val
+                        ? 'border-violet-500 bg-violet-50 text-violet-700'
+                        : 'border-muted text-muted-foreground hover:border-violet-200'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Dates */}
+            <div className={`grid gap-3 ${genType === 'journalier' ? 'grid-cols-1' : 'grid-cols-2'}`}>
+              <div className="space-y-1.5">
+                <Label>{genType === 'journalier' ? 'Date' : 'Du'}</Label>
+                <Input
+                  type="date"
+                  value={genStart}
+                  max={todayISO()}
+                  onChange={e => setGenStart(e.target.value)}
+                />
+              </div>
+              {genType !== 'journalier' && (
+                <div className="space-y-1.5">
+                  <Label>Au</Label>
+                  <Input
+                    type="date"
+                    value={genEnd}
+                    min={genStart}
+                    max={todayISO()}
+                    onChange={e => setGenEnd(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Sources */}
+            <div className="space-y-1.5">
+              <Label>Données à inclure</Label>
+              <div className="flex gap-2 flex-wrap">
+                {[
+                  { key: 'ventes',   label: 'Ventes',   icon: ShoppingCart, color: 'border-blue-300 bg-blue-50 text-blue-700' },
+                  { key: 'stock',    label: 'Stock',    icon: Package,      color: 'border-emerald-300 bg-emerald-50 text-emerald-700' },
+                  { key: 'depenses', label: 'Dépenses', icon: TrendingDown, color: 'border-red-300 bg-red-50 text-red-700' },
+                ].map(({ key, label, icon: Icon, color }) => {
+                  const active = genSources[key as keyof typeof genSources];
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setGenSources(s => ({ ...s, [key]: !s[key as keyof typeof s] }))}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                        active ? color : 'border-muted text-muted-foreground opacity-50'
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {label}
+                      {active && <CheckCircle className="h-3.5 w-3.5" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Format */}
+            <div className="space-y-1.5">
+              <Label>Format d'export</Label>
+              <div className="flex gap-2">
+                {[
+                  { val: 'xls', label: 'Excel (.xlsx)', icon: FileSpreadsheet, color: 'border-emerald-400 bg-emerald-50 text-emerald-700' },
+                  { val: 'csv', label: 'CSV',           icon: FileText,        color: 'border-sky-400 bg-sky-50 text-sky-700' },
+                ].map(({ val, label, icon: Icon, color }) => (
+                  <button
+                    key={val}
+                    onClick={() => setGenFmt(val)}
+                    className={`flex items-center gap-2 flex-1 py-2.5 px-3 rounded-lg border-2 text-sm font-medium transition-all ${
+                      genFmt === val ? color : 'border-muted text-muted-foreground hover:border-gray-300'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Info */}
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>Le rapport sera généré côté serveur et disponible en téléchargement immédiat. Il sera également archivé dans l'historique.</span>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGenOpen(false)}>Annuler</Button>
+            <Button
+              onClick={generateReport}
+              disabled={generating || !genStart}
+              className="min-w-40"
+            >
+              {generating ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Génération...</>
+              ) : (
+                <><Download className="mr-2 h-4 w-4" />Générer et télécharger</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
 
-export default ReportsImproved;
+export default Reports;

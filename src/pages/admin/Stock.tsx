@@ -1,812 +1,801 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
-import { 
-  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, 
-  CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer 
+import {
+  BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { 
-  Plus, Filter, Download, Search, TrendingUp, Package, 
-  ArrowUpRight, ArrowDownRight, Calendar, RefreshCw 
+import {
+  Plus, Filter, Download, Search, TrendingUp, Package,
+  ArrowUpRight, ArrowDownRight, RefreshCw, Loader2,
+  ArrowUp, ArrowDown, User, Calendar, Hash, FileText,
+  ChevronLeft, ChevronRight, AlertTriangle, Boxes,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
-// do not use useAdmin here (it redirects non-admins); fetch current user locally
-import { DatePickerWithRange } from '@/components/ui/date-range-picker';
+import { format } from 'date-fns';
+import { fr } from 'date-fns/locale';
 
-const StockImproved = () => {
+const ITEMS_PER_PAGE = 20;
+
+const SUBTYPE_LABELS: Record<string, string> = {
+  reaprovisonnement: 'Réapprovisionnement',
+  livraison: 'Livraison',
+  retour: 'Retour client',
+  vente: 'Vente',
+  ajustement: 'Ajustement',
+  autre: 'Autre',
+};
+
+const Stock = () => {
   const [movements, setMovements] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [filterProduct, setFilterProduct] = useState<string>('all');
-  const [filterType, setFilterType] = useState<string>('all');
-  const [timeFilter, setTimeFilter] = useState<string>('30days');
+  const [filterProduct, setFilterProduct] = useState('all');
+  const [filterType, setFilterType] = useState('all');
+  const [timeFilter, setTimeFilter] = useState('30days');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedTab, setSelectedTab] = useState('overview');
+  const [currentPage, setCurrentPage] = useState(1);
 
-  // Modal states
+  // Create dialog
   const [openCreate, setOpenCreate] = useState(false);
-  const [createProduct, setCreateProduct] = useState<string | null>(null);
-  const [createQty, setCreateQty] = useState<number>(1);
-  const [createSubtype, setCreateSubtype] = useState<string>('reaprovisonnement');
-  const [createRef, setCreateRef] = useState<string>('');
+  const [createType, setCreateType] = useState<'in' | 'out'>('in');
+  const [createProduct, setCreateProduct] = useState('');
+  const [createQty, setCreateQty] = useState(1);
+  const [createSubtype, setCreateSubtype] = useState('reaprovisonnement');
+  const [createRef, setCreateRef] = useState('');
   const [createNote, setCreateNote] = useState('');
   const [creating, setCreating] = useState(false);
 
-  const [user, setUser] = useState<any>(null);
   const [isEmployee, setIsEmployee] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
 
-  // Fetch data on component mount
   useEffect(() => {
     fetchProducts();
     fetchMovements();
-
-    // detect if current user is an employee (allow view but no write)
     (async () => {
       try {
         const resp = await apiFetch('/api/users/me');
         if (!resp.ok) return;
         const j = await resp.json().catch(() => ({}));
         const u = j.user || j.data || j;
-        setUser(u);
+        setUserId(u?.id || null);
         const roles = u?.roles || u?.role_names || u?.role || [];
         const roleList = Array.isArray(roles) ? roles : (typeof roles === 'string' ? [roles] : []);
-        const isEmp = roleList.some(r => typeof r === 'string' && ['employe','employé','employee','staff'].includes(r.toLowerCase()));
+        const isEmp = roleList.some((r: string) =>
+          typeof r === 'string' && ['employe', 'employé', 'employee', 'staff'].includes(r.toLowerCase())
+        );
         setIsEmployee(Boolean(isEmp));
-      } catch (err) {
-        // ignore
-      }
+      } catch (_) {}
     })();
   }, []);
 
-  // Fetch movements when filters change
   useEffect(() => {
     fetchMovements();
+    setCurrentPage(1);
   }, [filterProduct, filterType, timeFilter]);
 
-  // Fetch all products
   const fetchProducts = async () => {
     try {
       const resp = await apiFetch('/api/products?limit=1000');
       if (!resp.ok) return;
       const j = await resp.json().catch(() => ({ data: [] }));
       setProducts(Array.isArray(j.data) ? j.data : []);
-    } catch (e) {
-      console.error(e);
-      toast.error('Erreur lors du chargement des produits');
-    }
+    } catch (_) {}
   };
 
-  // Fetch filtered movements
   const fetchMovements = async () => {
     setLoading(true);
     try {
-      const qs = [];
-      if (filterProduct && filterProduct !== 'all') {
-        qs.push(`product_id=${encodeURIComponent(filterProduct)}`);
-      }
-      if (filterType && filterType !== 'all') {
-        qs.push(`movement_type=${encodeURIComponent(filterType)}`);
-      }
-      
-      const now = new Date();
-      let start = null;
-      if (timeFilter === 'today') {
-        start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-      }
-      if (timeFilter === '7days') {
-        start = new Date(now.getTime() - 7 * 24 * 3600 * 1000).toISOString();
-      }
-      if (timeFilter === '30days') {
-        start = new Date(now.getTime() - 30 * 24 * 3600 * 1000).toISOString();
-      }
-      if (start) qs.push(`start=${encodeURIComponent(start)}`);
+      const qs: string[] = [];
+      if (filterProduct && filterProduct !== 'all') qs.push(`product_id=${encodeURIComponent(filterProduct)}`);
+      if (filterType && filterType !== 'all') qs.push(`movement_type=${encodeURIComponent(filterType)}`);
 
-      const url = '/api/admin/stock-mouvements' + (qs.length ? `?${qs.join('&')}` : '');
-      const resp = await apiFetch(url);
-      if (!resp.ok) throw new Error('Failed to load movements');
-      
+      const now = new Date();
+      if (timeFilter === 'today') {
+        qs.push(`start=${encodeURIComponent(new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString())}`);
+      } else if (timeFilter === '7days') {
+        qs.push(`start=${encodeURIComponent(new Date(now.getTime() - 7 * 86400000).toISOString())}`);
+      } else if (timeFilter === '30days') {
+        qs.push(`start=${encodeURIComponent(new Date(now.getTime() - 30 * 86400000).toISOString())}`);
+      }
+
+      const resp = await apiFetch('/api/admin/stock-mouvements' + (qs.length ? `?${qs.join('&')}` : ''));
+      if (!resp.ok) throw new Error();
       const j = await resp.json();
       setMovements(Array.isArray(j.data) ? j.data : []);
-    } catch (e) {
-      console.error(e);
+    } catch (_) {
       toast.error('Impossible de charger les mouvements');
     } finally {
       setLoading(false);
     }
   };
 
-  // Filter movements by search query
   const filteredMovements = useMemo(() => {
-    return movements.filter(movement => {
-      const productName = (movement.product?.name || movement.product_name || '').toLowerCase();
-      const reference = (movement.reference || '').toLowerCase();
-      const query = searchQuery.toLowerCase();
-      
-      return productName.includes(query) || 
-             reference.includes(query) || 
-             movement.movement_type.includes(query);
-    });
+    if (!searchQuery.trim()) return movements;
+    const q = searchQuery.toLowerCase();
+    return movements.filter(m =>
+      (m.product_name || '').toLowerCase().includes(q) ||
+      (m.reference || '').toLowerCase().includes(q) ||
+      (m.created_by_name || '').toLowerCase().includes(q) ||
+      (m.movement_subtype || '').toLowerCase().includes(q)
+    );
   }, [movements, searchQuery]);
 
-  // Calculate summary statistics
-  const summaryStats = useMemo(() => {
-    const totalIn = movements
-      .filter(m => m.movement_type === 'in')
-      .reduce((sum, m) => sum + (Number(m.quantity) || 0), 0);
-    
-    const totalOut = movements
-      .filter(m => m.movement_type === 'out')
-      .reduce((sum, m) => sum + (Number(m.quantity) || 0), 0);
-    
-    const netChange = totalIn - totalOut;
+  const totalPages = Math.ceil(filteredMovements.length / ITEMS_PER_PAGE);
+  const pageMovements = filteredMovements.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
+  const stats = useMemo(() => {
+    const totalIn = movements.filter(m => m.movement_type === 'in').reduce((s, m) => s + Number(m.quantity || 0), 0);
+    const totalOut = movements.filter(m => m.movement_type === 'out').reduce((s, m) => s + Number(m.quantity || 0), 0);
+    const net = totalIn - totalOut;
     const uniqueProducts = new Set(movements.map(m => m.product_id)).size;
-    
-    return { totalIn, totalOut, netChange, uniqueProducts };
+    return { totalIn, totalOut, net, uniqueProducts };
   }, [movements]);
 
-  // Prepare chart data
   const chartData = useMemo(() => {
-    const map = new Map();
+    const map = new Map<string, { date: string; label: string; in: number; out: number }>();
     movements.forEach(m => {
-      const date = new Date(m.created_at || m.createdAt || m.created);
-      const dateKey = date.toISOString().slice(0, 10);
-      
-      if (!map.has(dateKey)) {
-        map.set(dateKey, { 
-          date: dateKey, 
-          formattedDate: date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }),
-          in: 0, 
+      const d = new Date(m.created_at);
+      const key = d.toISOString().slice(0, 10);
+      if (!map.has(key)) {
+        map.set(key, {
+          date: key,
+          label: format(d, 'd MMM', { locale: fr }),
+          in: 0,
           out: 0,
-          net: 0
         });
       }
-      
-      const obj = map.get(dateKey);
-      if (m.movement_type === 'in') {
-        obj.in += Number(m.quantity || 0);
-        obj.net += Number(m.quantity || 0);
-      } else {
-        obj.out += Number(m.quantity || 0);
-        obj.net -= Number(m.movement_type === 'out' ? m.quantity || 0 : 0);
-      }
-      
-      map.set(dateKey, obj);
+      const obj = map.get(key)!;
+      if (m.movement_type === 'in') obj.in += Number(m.quantity || 0);
+      else obj.out += Number(m.quantity || 0);
     });
-    
-    return Array.from(map.values())
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(-15); // Show last 15 days
+    return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date)).slice(-14);
   }, [movements]);
 
-  // Prepare product distribution data for pie chart
-  const productDistributionData = useMemo(() => {
-    const distribution = new Map();
-    
-    movements.forEach(m => {
-      const productName = m.product?.name || m.product_name || 'Inconnu';
-      const quantity = Number(m.quantity) || 0;
-      
-      if (distribution.has(productName)) {
-        distribution.set(productName, distribution.get(productName) + quantity);
-      } else {
-        distribution.set(productName, quantity);
-      }
-    });
-    
-    return Array.from(distribution.entries())
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 8); // Top 8 products
-  }, [movements]);
+  const handleCreate = async () => {
+    if (!createProduct) { toast.error('Sélectionnez un produit'); return; }
+    if (!createQty || createQty <= 0) { toast.error('Quantité invalide'); return; }
 
-  // Colors for charts
-  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D', '#FFC658', '#8DD1E1'];
-
-  const createMovement = async () => {
-    if (isEmployee) {
-      toast.error('Permission refusée');
-      return;
-    }
-    if (!createProduct) {
-      toast.error('Sélectionnez un produit');
-      return;
-    }
-    if (!createQty || createQty <= 0) {
-      toast.error('Quantité invalide');
-      return;
-    }
-    
     setCreating(true);
     try {
-      const payload = {
-        product_id: createProduct,
-        movement_type: 'in',
-        movement_subtype: createSubtype,
-        quantity: Number(createQty),
-        reference: createRef || null,
-        note: createNote || null,
-        unit_cost: null,
-        metadata: { 
-          created_via: 'admin_stock_page',
-          created_by: user?.id 
-        }
-      };
-      
       const resp = await apiFetch('/api/admin/stock-mouvements', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          product_id: createProduct,
+          movement_type: createType,
+          movement_subtype: createSubtype,
+          quantity: Number(createQty),
+          reference: createRef || null,
+          note: createNote || null,
+          metadata: { created_via: 'admin_stock_page', created_by: userId },
+        }),
       });
-      
-      if (!resp.ok) throw new Error('Erreur création');
-      
-      toast.success('Entrée de stock créée avec succès');
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        if (err.error === 'insufficient_stock') {
+          toast.error('Stock insuffisant pour cette sortie');
+          return;
+        }
+        throw new Error();
+      }
+      toast.success(`${createType === 'in' ? 'Entrée' : 'Sortie'} de stock enregistrée`);
       setOpenCreate(false);
-      resetCreateForm();
+      setCreateProduct('');
+      setCreateQty(1);
+      setCreateSubtype('reaprovisonnement');
+      setCreateRef('');
+      setCreateNote('');
       fetchMovements();
       fetchProducts();
-    } catch (e) {
-      console.error(e);
+    } catch (_) {
       toast.error('Impossible de créer le mouvement');
     } finally {
       setCreating(false);
     }
   };
 
-  const resetCreateForm = () => {
-    setCreateProduct(null);
-    setCreateQty(1);
-    setCreateSubtype('reaprovisonnement');
-    setCreateRef('');
-    setCreateNote('');
+  const exportCSV = () => {
+    const rows = [
+      ['Date', 'Produit', 'Type', 'Sous-type', 'Quantité', 'Référence', 'Créé par'],
+      ...filteredMovements.map(m => [
+        format(new Date(m.created_at), 'dd/MM/yyyy HH:mm'),
+        m.product_name || '',
+        m.movement_type === 'in' ? 'Entrée' : 'Sortie',
+        SUBTYPE_LABELS[m.movement_subtype] || m.movement_subtype || '',
+        m.quantity,
+        m.reference || '',
+        m.created_by_name || '',
+      ]),
+    ];
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `mouvements_stock_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    link.click();
+    toast.success(`${filteredMovements.length} mouvements exportés`);
   };
 
-  const exportToCSV = () => {
-    // Implement CSV export logic here
-    toast.info('Export CSV en cours de développement');
-  };
+  const timePeriodLabel = { today: "Aujourd'hui", '7days': '7 derniers jours', '30days': '30 derniers jours', all: 'Toutes les périodes' }[timeFilter];
 
-  const getStatusBadge = (status: string) => {
-    switch(status?.toLowerCase()) {
-      case 'active': return <Badge variant="success">Actif</Badge>;
-      case 'voided': return <Badge variant="destructive">Annulé</Badge>;
-      default: return <Badge variant="secondary">{status || 'Inconnu'}</Badge>;
-    }
-  };
-
-  const getTypeBadge = (type: string) => {
-    switch(type?.toLowerCase()) {
-      case 'in': return <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Entrée</Badge>;
-      case 'out': return <Badge className="bg-red-100 text-red-800 hover:bg-red-100">Sortie</Badge>;
-      default: return <Badge variant="outline">{type}</Badge>;
-    }
-  };
+  const selectedProduct = products.find(p => p.id === createProduct);
 
   return (
-    <div className="space-y-6 p-6 bg-gray-50 min-h-screen">
-      {/* Header Section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Gestion du Stock</h1>
-          <p className="text-gray-600 mt-1">
-            Suivez et gérez les entrées et sorties de stock en temps réel
-          </p>
+    <div className="space-y-6 p-4">
+      {/* ── Header ── */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shrink-0">
+            <Boxes className="h-6 w-6 text-white" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">Mouvements de stock</h1>
+            <p className="text-muted-foreground mt-0.5">Suivez toutes les entrées et sorties en temps réel</p>
+          </div>
         </div>
-        <div className="flex gap-2">
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={fetchMovements} disabled={loading}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Actualiser
+          </Button>
+          <Button variant="outline" size="sm" onClick={exportCSV} disabled={filteredMovements.length === 0}>
+            <Download className="mr-2 h-4 w-4" />
+            Exporter CSV
+          </Button>
           {!isEmployee && (
-            <Button variant="outline" onClick={exportToCSV} className="gap-2">
-              <Download size={16} />
-              Exporter
-            </Button>
-          )}
-          {!isEmployee && (
-            <Button onClick={() => setOpenCreate(true)} className="gap-2 bg-blue-600 hover:bg-blue-700">
-              <Plus size={16} />
-              Nouvelle Entrée
+            <Button onClick={() => setOpenCreate(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Nouveau mouvement
             </Button>
           )}
           {isEmployee && (
-            <div className="text-sm text-gray-600 self-center">Accès lecture seule</div>
+            <Badge variant="secondary" className="py-1.5 px-3">Lecture seule</Badge>
           )}
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* ── Stats ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="pt-5">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Entrées totales</p>
-                <h3 className="text-2xl font-bold mt-2">{summaryStats.totalIn}</h3>
+                <p className="text-sm text-muted-foreground font-medium">Entrées</p>
+                <p className="text-3xl font-bold text-emerald-600 mt-1">+{stats.totalIn}</p>
+                <p className="text-xs text-muted-foreground mt-1">{timePeriodLabel}</p>
               </div>
-              <div className="p-3 bg-green-50 rounded-full">
-                <ArrowUpRight className="h-6 w-6 text-green-600" />
+              <div className="w-11 h-11 rounded-lg bg-emerald-100 flex items-center justify-center">
+                <ArrowUpRight className="h-5 w-5 text-emerald-600" />
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">30 derniers jours</p>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="pt-5">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Sorties totales</p>
-                <h3 className="text-2xl font-bold mt-2">{summaryStats.totalOut}</h3>
+                <p className="text-sm text-muted-foreground font-medium">Sorties</p>
+                <p className="text-3xl font-bold text-red-600 mt-1">-{stats.totalOut}</p>
+                <p className="text-xs text-muted-foreground mt-1">{timePeriodLabel}</p>
               </div>
-              <div className="p-3 bg-red-50 rounded-full">
-                <ArrowDownRight className="h-6 w-6 text-red-600" />
+              <div className="w-11 h-11 rounded-lg bg-red-100 flex items-center justify-center">
+                <ArrowDownRight className="h-5 w-5 text-red-600" />
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">30 derniers jours</p>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="pt-5">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Variation nette</p>
-                <h3 className={`text-2xl font-bold mt-2 ${summaryStats.netChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {summaryStats.netChange >= 0 ? '+' : ''}{summaryStats.netChange}
-                </h3>
+                <p className="text-sm text-muted-foreground font-medium">Variation nette</p>
+                <p className={`text-3xl font-bold mt-1 ${stats.net >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {stats.net >= 0 ? '+' : ''}{stats.net}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">Entrées − Sorties</p>
               </div>
-              <div className="p-3 bg-blue-50 rounded-full">
-                <TrendingUp className="h-6 w-6 text-blue-600" />
+              <div className={`w-11 h-11 rounded-lg flex items-center justify-center ${stats.net >= 0 ? 'bg-emerald-50' : 'bg-red-50'}`}>
+                <TrendingUp className={`h-5 w-5 ${stats.net >= 0 ? 'text-emerald-600' : 'text-red-600'}`} />
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">Balance entrées/sorties</p>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="pt-5">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Produits actifs</p>
-                <h3 className="text-2xl font-bold mt-2">{summaryStats.uniqueProducts}</h3>
+                <p className="text-sm text-muted-foreground font-medium">Produits touchés</p>
+                <p className="text-3xl font-bold mt-1">{stats.uniqueProducts}</p>
+                <p className="text-xs text-muted-foreground mt-1">Avec mouvements</p>
               </div>
-              <div className="p-3 bg-purple-50 rounded-full">
-                <Package className="h-6 w-6 text-purple-600" />
+              <div className="w-11 h-11 rounded-lg bg-blue-100 flex items-center justify-center">
+                <Package className="h-5 w-5 text-blue-600" />
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">Avec mouvements récents</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Main Content Tabs */}
-      <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-4">
-        <TabsList className="grid w-full md:w-auto grid-cols-2 md:grid-cols-3">
-          <TabsTrigger value="overview" className="data-[state=active]:bg-blue-50">
-            Vue d'ensemble
-          </TabsTrigger>
-          <TabsTrigger value="movements" className="data-[state=active]:bg-blue-50">
-            Mouvements
-          </TabsTrigger>
-          <TabsTrigger value="analytics" className="data-[state=active]:bg-blue-50">
-            Analyse
-          </TabsTrigger>
-        </TabsList>
+      {/* ── Filters ── */}
+      <Card>
+        <CardContent className="pt-5">
+          <div className="flex flex-col md:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Rechercher produit, référence, employé..."
+                value={searchQuery}
+                onChange={e => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+                className="pl-10"
+              />
+            </div>
 
-        {/* Overview Tab */}
-        <TabsContent value="overview" className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Line Chart */}
-            <Card className="lg:col-span-2">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5" />
-                  Évolution des mouvements de stock
-                </CardTitle>
-                <CardDescription>
-                  Entrées et sorties sur les 15 derniers jours
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                      <XAxis 
-                        dataKey="formattedDate" 
-                        stroke="#666"
-                        fontSize={12}
-                      />
-                      <YAxis stroke="#666" fontSize={12} />
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: 'white', 
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '6px'
-                        }}
-                      />
-                      <Legend />
-                      <Line 
-                        type="monotone" 
-                        dataKey="in" 
-                        stroke="#10b981" 
-                        strokeWidth={2}
-                        name="Entrées"
-                        dot={{ r: 4 }}
-                        activeDot={{ r: 6 }}
-                      />
-                      <Line 
-                        type="monotone" 
-                        dataKey="out" 
-                        stroke="#ef4444" 
-                        strokeWidth={2}
-                        name="Sorties"
-                        dot={{ r: 4 }}
-                        activeDot={{ r: 6 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Filters Card */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Filter className="h-5 w-5" />
-                  Filtres
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Recherche</label>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                      <Input
-                        placeholder="Rechercher produit ou référence..."
-                        className="pl-9"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Produit</label>
-                    <Select value={filterProduct} onValueChange={setFilterProduct}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Tous les produits" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Tous les produits</SelectItem>
-                        {products.map(p => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Type</label>
-                      <Select value={filterType} onValueChange={setFilterType}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">Tous</SelectItem>
-                          <SelectItem value="in">Entrée</SelectItem>
-                          <SelectItem value="out">Sortie</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Période</label>
-                      <Select value={timeFilter} onValueChange={setTimeFilter}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Période" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="today">Aujourd'hui</SelectItem>
-                          <SelectItem value="7days">7 jours</SelectItem>
-                          <SelectItem value="30days">30 jours</SelectItem>
-                          <SelectItem value="all">Tout</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 pt-2">
-                    <Button 
-                      onClick={fetchMovements} 
-                      className="flex-1 gap-2"
-                    >
-                      <RefreshCw className="h-4 w-4" />
-                      Appliquer
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setFilterProduct('all');
-                        setFilterType('all');
-                        setTimeFilter('30days');
-                        setSearchQuery('');
-                      }}
-                      className="flex-1"
-                    >
-                      Réinitialiser
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Distribution Chart */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Distribution par produit</CardTitle>
-                <CardDescription>Top 8 produits les plus actifs</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={productDistributionData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                        outerRadius={80}
-                        fill="#8884d8"
-                        dataKey="value"
-                      >
-                        {productDistributionData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(value) => [`${value} unités`, 'Quantité']} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        {/* Movements Tab */}
-        <TabsContent value="movements">
-          <Card>
-            <CardHeader>
-              <CardTitle>Historique des mouvements</CardTitle>
-              <CardDescription>
-                {filteredMovements.length} mouvements trouvés
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <div className="space-y-3">
-                  {[...Array(5)].map((_, i) => (
-                    <Skeleton key={i} className="h-12 w-full" />
+            <div className="flex gap-2 flex-wrap">
+              <Select value={filterProduct} onValueChange={v => { setFilterProduct(v); setCurrentPage(1); }}>
+                <SelectTrigger className="w-[200px]">
+                  <Package className="mr-2 h-4 w-4 text-muted-foreground" />
+                  <SelectValue placeholder="Tous les produits" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous les produits</SelectItem>
+                  {products.map(p => (
+                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={filterType} onValueChange={v => { setFilterType(v); setCurrentPage(1); }}>
+                <SelectTrigger className="w-[150px]">
+                  <Filter className="mr-2 h-4 w-4 text-muted-foreground" />
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous types</SelectItem>
+                  <SelectItem value="in">Entrées seulement</SelectItem>
+                  <SelectItem value="out">Sorties seulement</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={timeFilter} onValueChange={v => { setTimeFilter(v); setCurrentPage(1); }}>
+                <SelectTrigger className="w-[160px]">
+                  <Calendar className="mr-2 h-4 w-4 text-muted-foreground" />
+                  <SelectValue placeholder="Période" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="today">Aujourd'hui</SelectItem>
+                  <SelectItem value="7days">7 derniers jours</SelectItem>
+                  <SelectItem value="30days">30 derniers jours</SelectItem>
+                  <SelectItem value="all">Tout l'historique</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {(filterProduct !== 'all' || filterType !== 'all' || timeFilter !== '30days' || searchQuery) && (
+                <Button variant="ghost" size="sm" onClick={() => {
+                  setFilterProduct('all'); setFilterType('all'); setTimeFilter('30days'); setSearchQuery(''); setCurrentPage(1);
+                }}>
+                  Réinitialiser
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Main content: table + chart ── */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        {/* Table */}
+        <Card className="xl:col-span-2">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Historique des mouvements</CardTitle>
+                <CardDescription>
+                  {filteredMovements.length} mouvement{filteredMovements.length !== 1 ? 's' : ''} · {timePeriodLabel}
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="space-y-3">
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <Skeleton className="w-1 h-12 rounded-full" />
+                    <Skeleton className="h-12 flex-1 rounded-md" />
+                  </div>
+                ))}
+              </div>
+            ) : filteredMovements.length === 0 ? (
+              <div className="text-center py-16">
+                <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+                  <Package className="h-8 w-8 text-muted-foreground" />
                 </div>
-              ) : (
-                <div className="rounded-md border">
+                <h3 className="font-medium text-lg mb-1">Aucun mouvement trouvé</h3>
+                <p className="text-muted-foreground text-sm">
+                  {searchQuery || filterProduct !== 'all' || filterType !== 'all'
+                    ? 'Essayez de modifier vos filtres'
+                    : 'Aucun mouvement sur cette période'}
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="rounded-md border overflow-hidden">
                   <Table>
-                    <TableHeader className="bg-gray-50">
-                      <TableRow>
-                        <TableHead className="font-semibold">Produit</TableHead>
-                        <TableHead className="font-semibold">Type</TableHead>
-                        <TableHead className="font-semibold">Sous-type</TableHead>
-                        <TableHead className="font-semibold">Quantité</TableHead>
-                        <TableHead className="font-semibold">Référence</TableHead>
-                        <TableHead className="font-semibold">Date</TableHead>
-                        <TableHead className="font-semibold">Status</TableHead>
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead className="w-2 p-0" />
+                        <TableHead>Produit</TableHead>
+                        <TableHead className="text-center">Type</TableHead>
+                        <TableHead className="text-center font-semibold">Qté</TableHead>
+                        <TableHead>Référence</TableHead>
+                        <TableHead>Par</TableHead>
+                        <TableHead>Date</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredMovements.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={7} className="text-center py-8 text-gray-500">
-                            Aucun mouvement trouvé
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        filteredMovements.map(m => (
-                          <TableRow key={m.id} className="hover:bg-gray-50">
-                            <TableCell className="font-medium">
-                              {m.product?.name || m.product_name || '-'}
+                      {pageMovements.map(m => {
+                        const isIn = m.movement_type === 'in';
+                        return (
+                          <TableRow key={m.id} className="hover:bg-muted/30">
+                            {/* Color bar */}
+                            <TableCell className="p-0 w-1">
+                              <div className={`h-full w-1 min-h-[52px] rounded-l-sm ${isIn ? 'bg-emerald-500' : 'bg-red-500'}`} />
                             </TableCell>
-                            <TableCell>{getTypeBadge(m.movement_type)}</TableCell>
+
                             <TableCell>
-                              <Badge variant="outline" className="font-normal">
-                                {m.movement_subtype}
-                              </Badge>
+                              <div className="font-medium text-sm">{m.product_name || '—'}</div>
+                              <div className="text-xs text-muted-foreground mt-0.5">
+                                {SUBTYPE_LABELS[m.movement_subtype] || m.movement_subtype || '—'}
+                              </div>
                             </TableCell>
-                            <TableCell className="font-medium">
-                              {m.quantity}
+
+                            <TableCell className="text-center">
+                              {isIn ? (
+                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-100 rounded-full px-2.5 py-1">
+                                  <ArrowUp className="h-3 w-3" /> Entrée
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 bg-red-100 rounded-full px-2.5 py-1">
+                                  <ArrowDown className="h-3 w-3" /> Sortie
+                                </span>
+                              )}
                             </TableCell>
-                            <TableCell className="text-gray-600">
-                              {m.reference || '-'}
+
+                            <TableCell className="text-center">
+                              <span className={`text-lg font-bold ${isIn ? 'text-emerald-600' : 'text-red-600'}`}>
+                                {isIn ? '+' : '-'}{m.quantity}
+                              </span>
                             </TableCell>
-                            <TableCell className="text-gray-600">
-                              {new Date(m.created_at).toLocaleDateString('fr-FR', {
-                                day: 'numeric',
-                                month: 'short',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })}
+
+                            <TableCell>
+                              {m.reference ? (
+                                <div className="flex items-center gap-1 text-sm">
+                                  <Hash className="h-3 w-3 text-muted-foreground shrink-0" />
+                                  <span className="font-mono text-xs">{m.reference}</span>
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground text-xs">—</span>
+                              )}
                             </TableCell>
-                            <TableCell>{getStatusBadge(m.status)}</TableCell>
+
+                            <TableCell>
+                              {m.created_by_name ? (
+                                <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                  <User className="h-3 w-3 shrink-0" />
+                                  <span className="truncate max-w-[100px]">{m.created_by_name}</span>
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground text-xs">Système</span>
+                              )}
+                            </TableCell>
+
+                            <TableCell>
+                              <div className="text-sm text-muted-foreground">
+                                {format(new Date(m.created_at), 'dd MMM yyyy', { locale: fr })}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {format(new Date(m.created_at), 'HH:mm')}
+                              </div>
+                            </TableCell>
                           </TableRow>
-                        ))
-                      )}
+                        );
+                      })}
                     </TableBody>
                   </Table>
+                </div>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between pt-4">
+                    <p className="text-sm text-muted-foreground">
+                      {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredMovements.length)} sur {filteredMovements.length}
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                        let n = i + 1;
+                        if (totalPages > 5) {
+                          if (currentPage <= 3) n = i + 1;
+                          else if (currentPage >= totalPages - 2) n = totalPages - 4 + i;
+                          else n = currentPage - 2 + i;
+                        }
+                        return (
+                          <Button key={n} variant={currentPage === n ? 'default' : 'outline'} size="sm" className="w-8 h-8 p-0" onClick={() => setCurrentPage(n)}>
+                            {n}
+                          </Button>
+                        );
+                      })}
+                      <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Sidebar */}
+        <div className="space-y-4">
+          {/* Bar chart */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Activité récente</CardTitle>
+              <CardDescription className="text-xs">Entrées vs Sorties par jour</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {chartData.length === 0 ? (
+                <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">Pas de données</div>
+              ) : (
+                <div className="h-52">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData} barSize={8} margin={{ left: -20, right: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis dataKey="label" fontSize={10} tick={{ fill: '#888' }} />
+                      <YAxis fontSize={10} tick={{ fill: '#888' }} />
+                      <Tooltip
+                        contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                        formatter={(v: any, name: string) => [v, name === 'in' ? 'Entrées' : 'Sorties']}
+                      />
+                      <Legend formatter={(v) => v === 'in' ? 'Entrées' : 'Sorties'} iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+                      <Bar dataKey="in" fill="#10b981" radius={[3, 3, 0, 0]} name="in" />
+                      <Bar dataKey="out" fill="#ef4444" radius={[3, 3, 0, 0]} name="out" />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
               )}
             </CardContent>
           </Card>
-        </TabsContent>
 
-        {/* Analytics Tab */}
-        <TabsContent value="analytics">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Top produits */}
+          {(() => {
+            const topMap = new Map<string, number>();
+            movements.forEach(m => {
+              const name = m.product_name || 'Inconnu';
+              topMap.set(name, (topMap.get(name) || 0) + Number(m.quantity || 0));
+            });
+            const top = Array.from(topMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+            if (top.length === 0) return null;
+            const max = top[0][1];
+            return (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Produits les plus actifs</CardTitle>
+                  <CardDescription className="text-xs">Par volume total de mouvements</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {top.map(([name, qty], i) => (
+                    <div key={name}>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-sm font-medium truncate flex-1 mr-2" title={name}>
+                          {i + 1}. {name}
+                        </span>
+                        <span className="text-sm font-bold shrink-0">{qty}</span>
+                      </div>
+                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full"
+                          style={{ width: `${(qty / max) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            );
+          })()}
+
+          {/* Répartition rapide */}
+          {movements.length > 0 && (
             <Card>
-              <CardHeader>
-                <CardTitle>Volume mensuel</CardTitle>
-                <CardDescription>Comparaison entrées/sorties</CardDescription>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Répartition</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="h-72">
-                  {/* Bar chart for monthly comparison would go here */}
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="formattedDate" />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Bar dataKey="in" name="Entrées" fill="#10b981" />
-                      <Bar dataKey="out" name="Sorties" fill="#ef4444" />
-                    </BarChart>
-                  </ResponsiveContainer>
+              <CardContent className="space-y-3">
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-emerald-600 font-medium">Entrées</span>
+                    <span className="font-semibold">{stats.totalIn > 0 ? Math.round((stats.totalIn / (stats.totalIn + stats.totalOut)) * 100) : 0}%</span>
+                  </div>
+                  <div className="h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full transition-all"
+                      style={{ width: stats.totalIn + stats.totalOut > 0 ? `${(stats.totalIn / (stats.totalIn + stats.totalOut)) * 100}%` : '0%' }}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-red-600 font-medium">Sorties</span>
+                    <span className="font-semibold">{stats.totalOut > 0 ? Math.round((stats.totalOut / (stats.totalIn + stats.totalOut)) * 100) : 0}%</span>
+                  </div>
+                  <div className="h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-red-500 rounded-full transition-all"
+                      style={{ width: stats.totalIn + stats.totalOut > 0 ? `${(stats.totalOut / (stats.totalIn + stats.totalOut)) * 100}%` : '0%' }}
+                    />
+                  </div>
                 </div>
               </CardContent>
             </Card>
+          )}
+        </div>
+      </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Tendances</CardTitle>
-                <CardDescription>Indicateurs de performance</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="p-4 bg-blue-50 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-blue-700">Taux de rotation</p>
-                      <p className="text-2xl font-bold mt-1">2.4</p>
-                    </div>
-                    <TrendingUp className="h-8 w-8 text-blue-600" />
-                  </div>
-                </div>
-                <div className="p-4 bg-green-50 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-green-700">Disponibilité moyenne</p>
-                      <p className="text-2xl font-bold mt-1">94%</p>
-                    </div>
-                    <Package className="h-8 w-8 text-green-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-      </Tabs>
-
-      {/* Create Movement Dialog */}
+      {/* ── Create dialog ── */}
       <Dialog open={openCreate} onOpenChange={setOpenCreate}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle className="text-xl">Nouvelle entrée de stock</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus className="h-5 w-5" />
+              Nouveau mouvement de stock
+            </DialogTitle>
             <DialogDescription>
-              Ajoutez une nouvelle entrée de stock dans le système
+              Enregistrez une entrée ou une sortie de stock
             </DialogDescription>
           </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Produit *</label>
-              <Select value={createProduct || ''} onValueChange={(v) => setCreateProduct(v || null)}>
+
+          <div className="space-y-4 pt-2">
+            {/* Type selector */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => { setCreateType('in'); setCreateSubtype('reaprovisonnement'); }}
+                className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-all ${createType === 'in' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-muted text-muted-foreground hover:border-emerald-200'}`}
+              >
+                <ArrowUp className="h-5 w-5" />
+                <div className="text-left">
+                  <div className="font-semibold text-sm">Entrée</div>
+                  <div className="text-xs opacity-70">Réception de stock</div>
+                </div>
+              </button>
+              <button
+                onClick={() => { setCreateType('out'); setCreateSubtype('vente'); }}
+                className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-all ${createType === 'out' ? 'border-red-500 bg-red-50 text-red-700' : 'border-muted text-muted-foreground hover:border-red-200'}`}
+              >
+                <ArrowDown className="h-5 w-5" />
+                <div className="text-left">
+                  <div className="font-semibold text-sm">Sortie</div>
+                  <div className="text-xs opacity-70">Consommation de stock</div>
+                </div>
+              </button>
+            </div>
+
+            {/* Product */}
+            <div className="space-y-1.5">
+              <Label>Produit *</Label>
+              <Select value={createProduct} onValueChange={setCreateProduct}>
                 <SelectTrigger>
                   <SelectValue placeholder="Sélectionnez un produit" />
                 </SelectTrigger>
                 <SelectContent>
                   {products.map(p => (
                     <SelectItem key={p.id} value={p.id}>
-                      {p.name} {p.current_stock !== undefined && `(Stock: ${p.current_stock})`}
+                      <span>{p.name}</span>
+                      {p.stock !== undefined && (
+                        <span className="text-muted-foreground ml-2 text-xs">(Stock actuel : {p.stock})</span>
+                      )}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {selectedProduct && createType === 'out' && selectedProduct.stock !== undefined && (
+                <div className={`flex items-center gap-1.5 text-xs mt-1 ${Number(selectedProduct.stock) < createQty ? 'text-red-600' : 'text-muted-foreground'}`}>
+                  <AlertTriangle className="h-3 w-3" />
+                  Stock disponible : <strong>{selectedProduct.stock}</strong>
+                  {Number(selectedProduct.stock) < createQty && ' — insuffisant !'}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Quantité *</label>
+              {/* Quantity */}
+              <div className="space-y-1.5">
+                <Label>Quantité *</Label>
                 <Input
                   type="number"
                   min="1"
                   value={createQty}
-                  onChange={(e) => setCreateQty(Number(e.target.value))}
+                  onChange={e => setCreateQty(Number(e.target.value))}
                 />
               </div>
-              
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Type d'entrée</label>
+
+              {/* Subtype */}
+              <div className="space-y-1.5">
+                <Label>Motif</Label>
                 <Select value={createSubtype} onValueChange={setCreateSubtype}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="reaprovisonnement">Réapprovisionnement</SelectItem>
-                    <SelectItem value="livraison">Livraison</SelectItem>
-                    <SelectItem value="retour">Retour client</SelectItem>
-                    <SelectItem value="autre">Autre</SelectItem>
+                    {createType === 'in' ? (
+                      <>
+                        <SelectItem value="reaprovisonnement">Réapprovisionnement</SelectItem>
+                        <SelectItem value="livraison">Livraison</SelectItem>
+                        <SelectItem value="retour">Retour client</SelectItem>
+                        <SelectItem value="ajustement">Ajustement</SelectItem>
+                        <SelectItem value="autre">Autre</SelectItem>
+                      </>
+                    ) : (
+                      <>
+                        <SelectItem value="vente">Vente</SelectItem>
+                        <SelectItem value="ajustement">Ajustement</SelectItem>
+                        <SelectItem value="autre">Autre</SelectItem>
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Référence (facultatif)</label>
+            {/* Reference */}
+            <div className="space-y-1.5">
+              <Label>Référence <span className="text-muted-foreground font-normal">(optionnel)</span></Label>
               <Input
-                placeholder="N° de bon, facture, etc."
+                placeholder="N° bon de commande, facture, etc."
                 value={createRef}
-                onChange={(e) => setCreateRef(e.target.value)}
+                onChange={e => setCreateRef(e.target.value)}
               />
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Notes (facultatif)</label>
+            {/* Note */}
+            <div className="space-y-1.5">
+              <Label>Note <span className="text-muted-foreground font-normal">(optionnel)</span></Label>
               <Textarea
                 placeholder="Informations complémentaires..."
                 value={createNote}
-                onChange={(e) => setCreateNote(e.target.value)}
-                rows={3}
+                onChange={e => setCreateNote(e.target.value)}
+                rows={2}
               />
             </div>
           </div>
 
-          <DialogFooter className="sm:justify-between">
-            <Button variant="outline" onClick={() => setOpenCreate(false)}>
-              Annuler
-            </Button>
-            <Button 
-              onClick={createMovement} 
-              disabled={creating || !createProduct}
-              className="min-w-32"
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpenCreate(false)}>Annuler</Button>
+            <Button
+              onClick={handleCreate}
+              disabled={creating || !createProduct || !createQty}
+              className={createType === 'out' ? 'bg-red-600 hover:bg-red-700' : ''}
             >
               {creating ? (
-                <>
-                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                  Création...
-                </>
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />En cours...</>
               ) : (
-                'Créer l\'entrée'
+                <><Plus className="mr-2 h-4 w-4" />{createType === 'in' ? 'Enregistrer l\'entrée' : 'Enregistrer la sortie'}</>
               )}
             </Button>
           </DialogFooter>
@@ -816,4 +805,4 @@ const StockImproved = () => {
   );
 };
 
-export default StockImproved;
+export default Stock;

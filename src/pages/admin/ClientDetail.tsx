@@ -1,960 +1,531 @@
-import { useEffect, useState, useMemo } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
-import { 
-  Card, 
-  CardContent, 
-  CardHeader, 
-  CardTitle, 
-  CardDescription,
-  CardFooter
-} from '@/components/ui/card';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { 
-  Table, 
-  TableHeader, 
-  TableRow, 
-  TableHead, 
-  TableBody, 
-  TableCell 
-} from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Progress } from '@/components/ui/progress';
+import {
+  Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
+} from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
-import { 
-  format, 
-  differenceInDays, 
-  differenceInHours,
-  startOfMonth,
-  endOfMonth,
-  subMonths
-} from 'date-fns';
-import { fr } from 'date-fns/locale';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { apiFetch } from '@/lib/api';
-import { 
-  ArrowLeft, 
-  ShoppingCart, 
-  CreditCard, 
-  Calendar, 
-  DollarSign, 
-  User,
-  Mail,
-  Phone,
-  Building,
-  Globe,
-  TrendingUp,
-  Activity,
-  RefreshCw,
-  Eye,
-  Edit,
-  MoreVertical,
-  MessageSquare,
-  Package,
-  Truck,
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
-  BarChart3,
-  MapPin,
-  Clock,
-  Users,
-  Target,
-  ExternalLink,
-  Copy,
-  Send
+import { format, formatDistanceToNow } from 'date-fns';
+import { fr } from 'date-fns/locale';
+import {
+  ArrowLeft, RefreshCw, User, Mail, Phone, ShoppingCart,
+  TrendingUp, TrendingDown, Package, CheckCircle2, XCircle,
+  Clock, Trophy, Star, BarChart3, ChevronDown, ChevronUp,
+  Edit, Trash2, AlertTriangle, Calendar, Minus,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const fmtDate  = (d: string) => d ? format(new Date(d), 'dd/MM/yyyy HH:mm', { locale: fr }) : '—';
+const fmtShort = (d: string) => d ? format(new Date(d), 'dd/MM/yy',          { locale: fr }) : '—';
+const fmtRel   = (d: string) => d ? formatDistanceToNow(new Date(d), { locale: fr, addSuffix: true }) : '—';
+const fmtCfa   = (v: number | string) =>
+  Number(v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 0 }) + ' FCFA';
+
+const STATUS_CFG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  pending:    { label: 'En attente',  color: 'bg-amber-100  text-amber-800  border-amber-200',  icon: <Clock        className="w-3 h-3" /> },
+  processing: { label: 'En cours',    color: 'bg-blue-100   text-blue-800   border-blue-200',   icon: <RefreshCw    className="w-3 h-3" /> },
+  completed:  { label: 'Complétée',   color: 'bg-green-100  text-green-800  border-green-200',  icon: <CheckCircle2 className="w-3 h-3" /> },
+  cancelled:  { label: 'Annulée',     color: 'bg-red-100    text-red-800    border-red-200',    icon: <XCircle      className="w-3 h-3" /> },
+};
+
+const VIP_THRESHOLD_RANK = 3;   // top 3 = VIP
+const GOOD_RANK = 10;            // top 10 = bon client
+
+// ─── Composant ────────────────────────────────────────────────────────────────
 
 const ClientDetail = () => {
-  const { id } = useParams();
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [client, setClient] = useState<any>(null);
-  const [orders, setOrders] = useState<any[]>([]);
-  const [carts, setCarts] = useState<any[]>([]);
-  const [messages, setMessages] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('overview');
-  
 
-  // Statistiques calculées
-  const clientStats = useMemo(() => {
-    if (!client) return null;
-    
-    const totalRevenue = orders.reduce((sum, order) => sum + (Number(order.total_amount) || 0), 0);
-    const totalOrders = orders.length;
-    const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
-    
-    // Commandes du mois en cours
-    const now = new Date();
-    const monthStart = startOfMonth(now);
-    const monthEnd = endOfMonth(now);
-    
-    const currentMonthOrders = orders.filter(order => {
-      const orderDate = new Date(order.created_at);
-      return orderDate >= monthStart && orderDate <= monthEnd;
-    });
-    
-    const currentMonthRevenue = currentMonthOrders.reduce((sum, order) => 
-      sum + (Number(order.total_amount) || 0), 0
-    );
-    
-    // Commandes du mois précédent
-    const lastMonthStart = startOfMonth(subMonths(now, 1));
-    const lastMonthEnd = endOfMonth(subMonths(now, 1));
-    
-    const lastMonthOrders = orders.filter(order => {
-      const orderDate = new Date(order.created_at);
-      return orderDate >= lastMonthStart && orderDate <= lastMonthEnd;
-    });
-    
-    const lastMonthRevenue = lastMonthOrders.reduce((sum, order) => 
-      sum + (Number(order.total_amount) || 0), 0
-    );
-    
-    // Calcul de la variation
-    const revenueGrowth = lastMonthRevenue > 0 
-      ? ((currentMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100 
-      : currentMonthRevenue > 0 ? 100 : 0;
-    
-    // Paniers actifs
-    const activeCarts = carts.filter(cart => {
-      const lastActivity = new Date(cart.last_activity_at || cart.updated_at);
-      return differenceInHours(new Date(), lastActivity) <= 2;
-    });
-    
-    // Taux de conversion
-    const conversionRate = totalOrders > 0 ? Math.min(100, (totalOrders / (totalOrders + carts.length)) * 100) : 0;
-    
-    // Dernière activité
-    const lastOrder = orders[0];
-    const lastLogin = client.last_login_at;
-    const lastActivity = lastOrder?.created_at || lastLogin || client.updated_at;
-    
-    return {
-      totalRevenue,
-      totalOrders,
-      avgOrderValue,
-      currentMonthRevenue,
-      lastMonthRevenue,
-      revenueGrowth,
-      activeCarts: activeCarts.length,
-      totalCarts: carts.length,
-      conversionRate,
-      messagesCount: messages.length,
-      daysAsClient: client.created_at ? 
-        differenceInDays(new Date(), new Date(client.created_at)) : 0,
-      lastActivity
-    };
-  }, [client, orders, carts, messages]);
+  const [data, setData]       = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [editOpen, setEditOpen]   = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editForm, setEditForm]   = useState({ full_name: '', email: '', phone: '' });
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchClientData = async () => {
+  // ─── Chargement ──────────────────────────────────────────────────────────
+
+  const fetchData = useCallback(async (showSpinner = false) => {
     if (!id) return;
-    
-    setLoading(true);
+    if (showSpinner) setRefreshing(true);
     try {
-      const token = localStorage.getItem('sessionToken');
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
-      // Fetch client details (use ID)
-      const clientRes = await apiFetch(`/api/admin/clients/${id}`, { headers });
-      let fetchedClient: any = null;
-      if (clientRes.ok) {
-        const clientData = await clientRes.json();
-        fetchedClient = clientData.data || clientData;
-        setClient(fetchedClient);
-      }
-
-      // Fetch client orders
-      const ordersRes = await apiFetch(`/api/admin/orders?client_id=${id}`, { headers });
-      if (ordersRes.ok) {
-        const ordersData = await ordersRes.json();
-        setOrders((ordersData.data || []).sort((a: any, b: any) => 
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        ));
-      }
-
-      // Fetch client carts
-      const cartsRes = await apiFetch(`/api/admin/carts?client_id=${id}`, { headers });
-      if (cartsRes.ok) {
-        const cartsData = await cartsRes.json();
-        setCarts(cartsData.data || []);
-      }
-
-      // Fetch client messages using fetchedClient.email (fallback to existing client.email)
-      const emailToQuery = fetchedClient?.email || client?.email;
-      if (emailToQuery) {
-        const messagesRes = await apiFetch(`/api/contacts?email=${encodeURIComponent(emailToQuery)}`, { headers });
-        if (messagesRes.ok) {
-          const messagesData = await messagesRes.json();
-          setMessages(messagesData.results || messagesData.data || []);
-        }
-      }
-
-    } catch (err) {
-      console.error('Error fetching client data:', err);
-      toast.error('❌ Erreur lors du chargement des données');
+      const r = await apiFetch(`/api/admin/clients/${id}/stats`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const body = await r.json();
+      setData(body);
+      setEditForm({
+        full_name: body.client?.full_name || '',
+        email:     body.client?.email     || '',
+        phone:     body.client?.phone     || '',
+      });
+    } catch {
+      if (showSpinner) toast.error('Impossible de charger les données client');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  };
-
-  useEffect(() => {
-    fetchClientData();
-    // Setup refresh interval (every 15 seconds)
-    const interval = setInterval(fetchClientData, 15000);
-    return () => {
-      clearInterval(interval);
-    };
   }, [id]);
 
-  const handleRefresh = () => {
-    fetchClientData();
-    toast.info('🔄 Actualisation des données...');
-  };
+  useEffect(() => {
+    setLoading(true);
+    fetchData();
+    intervalRef.current = setInterval(() => fetchData(false), 30000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [fetchData]);
 
-  const handleContactClient = () => {
-    if (!client?.email) return;
-    
-    const subject = encodeURIComponent(`RealTech Holding - Suivi de votre compte`);
-    const body = encodeURIComponent(`Bonjour ${client.full_name || client.name || ''},\n\nNous vous contactons concernant votre compte chez RealTech Holding.\n\nCordialement,\nL'équipe RealTech`);
-    
-    window.open(`mailto:${client.email}?subject=${subject}&body=${body}`, '_blank');
-  };
+  // ─── Actions ─────────────────────────────────────────────────────────────
 
-  const handleCopyEmail = () => {
-    if (!client?.email) return;
-    
-    navigator.clipboard.writeText(client.email);
-    toast.success('📋 Email copié dans le presse-papier');
-  };
-
-  const handleViewOrder = (orderId: string) => {
-    navigate(`/admin/orders/${orderId}`);
-  };
-
-  const formatDateTime = (dateString: string) => {
+  const handleEdit = async () => {
     try {
-      const date = new Date(dateString);
-      return format(date, "dd MMM yyyy 'à' HH:mm", { locale: fr });
+      const r = await apiFetch(`/api/admin/clients/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editForm),
+      });
+      if (!r.ok) throw new Error();
+      toast.success('Client mis à jour');
+      setEditOpen(false);
+      fetchData(true);
     } catch {
-      return "Date invalide";
+      toast.error('Erreur lors de la mise à jour');
     }
   };
 
-  const formatRelativeTime = (dateString: string) => {
+  const handleDelete = async () => {
     try {
-      const date = new Date(dateString);
-      const now = new Date();
-      const hours = differenceInHours(now, date);
-      
-      if (hours < 1) return "Il y a moins d'une heure";
-      if (hours < 24) return `Il y a ${hours} heure${hours > 1 ? 's' : ''}`;
-      
-      const days = differenceInDays(now, date);
-      if (days === 1) return "Hier";
-      if (days < 7) return `Il y a ${days} jour${days > 1 ? 's' : ''}`;
-      
-      return format(date, "dd/MM/yyyy", { locale: fr });
-    } catch {
-      return "";
+      const r = await apiFetch(`/api/admin/clients/${id}`, { method: 'DELETE' });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error(body.error || 'Erreur');
+      }
+      toast.success('Client désactivé');
+      navigate('/admin/clients');
+    } catch (e: any) {
+      toast.error(e.message === 'client has pending orders'
+        ? 'Ce client a des commandes en attente — impossible de le supprimer'
+        : 'Erreur lors de la suppression');
+    } finally {
+      setDeleteOpen(false);
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'completed':
-      case 'delivered':
-        return 'bg-green-100 text-green-800 border-green-200';
-      case 'pending':
-      case 'processing':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'cancelled':
-      case 'refunded':
-        return 'bg-red-100 text-red-800 border-red-200';
-      case 'shipped':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
-      default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
-    }
-  };
+  // ─── États de chargement / erreur ────────────────────────────────────────
 
-  const getChannelColor = (channel: string) => {
-    switch (channel) {
-      case 'manual':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'import':
-        return 'bg-green-100 text-green-800 border-green-200';
-      case 'webhook':
-        return 'bg-purple-100 text-purple-800 border-purple-200';
-      case 'website':
-        return 'bg-orange-100 text-orange-800 border-orange-200';
-      default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
-    }
-  };
-
-  const getCartStatus = (cart: any) => {
-    const lastActivity = new Date(cart.last_activity_at || cart.updated_at);
-    const hoursSinceActivity = differenceInHours(new Date(), lastActivity);
-    
-    if (hoursSinceActivity <= 2) {
-      return { label: 'Actif', color: 'bg-green-100 text-green-800 border-green-200' };
-    } else if (hoursSinceActivity <= 24) {
-      return { label: 'Inactif', color: 'bg-yellow-100 text-yellow-800 border-yellow-200' };
-    } else {
-      return { label: 'Abandonné', color: 'bg-red-100 text-red-800 border-red-200' };
-    }
-  };
-
-  if (loading && !client) {
+  if (loading) {
     return (
-      <div className="p-6 space-y-6">
-        <div className="flex items-center gap-3">
-          <Skeleton className="h-10 w-32" />
-          <Skeleton className="h-10 w-64" />
+      <div className="p-6 space-y-5 max-w-5xl mx-auto">
+        <Skeleton className="h-8 w-40" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24" />)}
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <Skeleton className="h-96" />
-          <Skeleton className="h-96" />
-          <Skeleton className="h-96" />
-        </div>
+        <Skeleton className="h-72" />
       </div>
     );
   }
 
-  if (!client) {
+  if (!data?.client) {
     return (
-      <div className="p-6 text-center">
-        <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
-          <User className="h-8 w-8 text-gray-400" />
-        </div>
-        <h2 className="text-2xl font-bold mb-2">Client introuvable</h2>
-        <p className="text-muted-foreground mb-6">Le client avec l'ID "{id}" n'existe pas ou a été supprimé.</p>
-        <Button asChild>
-          <Link to="/admin/clients">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Retour à la liste
-          </Link>
+      <div className="p-10 text-center">
+        <User className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+        <h2 className="text-xl font-bold text-gray-700 mb-2">Client introuvable</h2>
+        <Button variant="outline" onClick={() => navigate('/admin/clients')}>
+          <ArrowLeft className="w-4 h-4 mr-2" />Retour
         </Button>
       </div>
     );
   }
 
+  const { client, rank, summary, orders, topProducts, monthly } = data;
+  const isVip  = rank && rank <= VIP_THRESHOLD_RANK;
+  const isGood = rank && rank <= GOOD_RANK;
+
+  // ─── Rendu ────────────────────────────────────────────────────────────────
+
   return (
-    <div className="space-y-6 p-4">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Button variant="outline" asChild>
-            <Link to="/admin/clients">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Retour
-            </Link>
+    <div className="p-4 md:p-6 space-y-5 max-w-5xl mx-auto">
+
+      {/* En-tête */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={() => navigate('/admin/clients')}>
+            <ArrowLeft className="w-4 h-4 mr-1" />Retour
           </Button>
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Détails du Client</h1>
-            <p className="text-muted-foreground mt-1">
-              {client.full_name || client.name || 'Client sans nom'} • Client depuis {clientStats?.daysAsClient} jour{clientStats?.daysAsClient !== 1 ? 's' : ''}
-            </p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold text-gray-900">{client.full_name || '—'}</h1>
+              {isVip  && <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 border border-yellow-200"><Trophy className="w-3 h-3" /> VIP</span>}
+              {!isVip && isGood && <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200"><Star className="w-3 h-3" /> Fidèle</span>}
+            </div>
+            <p className="text-xs text-gray-400">Client depuis {client.created_at ? fmtRel(client.created_at) : '—'}</p>
           </div>
         </div>
-        
-        <div className="flex items-center gap-2">
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={handleRefresh}
-          >
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Actualiser
+
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => fetchData(true)} disabled={refreshing}>
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </Button>
-          
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={handleContactClient}
-          >
-            <Send className="mr-2 h-4 w-4" />
-            Contacter
+          <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+            <Edit className="w-4 h-4 mr-1.5" />Modifier
           </Button>
-          
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => toast.info("Modification du client")}>
-                <Edit className="mr-2 h-4 w-4" />
-                Modifier
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleCopyEmail}>
-                <Copy className="mr-2 h-4 w-4" />
-                Copier l'email
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>
-                <MessageSquare className="mr-2 h-4 w-4" />
-                Envoyer un message
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Target className="mr-2 h-4 w-4" />
-                Créer une promotion
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50"
+            onClick={() => setDeleteOpen(true)}>
+            <Trash2 className="w-4 h-4" />
+          </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Colonne gauche : Profil et informations */}
-        <div className="space-y-6">
-          {/* Carte Profil */}
-          <Card>
-            <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50">
-              <CardTitle className="flex items-center gap-3">
-                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xl font-bold">
-                  {(client.full_name || client.name)?.[0]?.toUpperCase() || 'C'}
-                </div>
-                <div>
-                  <div className="text-xl font-bold">{client.full_name || client.name || 'Client sans nom'}</div>
-                  <div className="text-sm text-muted-foreground">{client.email}</div>
-                </div>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <Badge variant="outline" className={getChannelColor(client.created_by_channel)}>
-                    {client.created_by_channel === 'manual' ? 'Client manuel' :
-                     client.created_by_channel === 'import' ? 'Importé' :
-                     client.created_by_channel === 'webhook' ? 'Webhook' :
-                     client.created_by_channel === 'website' ? 'Site web' : client.created_by_channel}
-                  </Badge>
-                  
-                  <Badge variant={client.is_active ? "default" : "destructive"}>
-                    {client.is_active ? 'Actif' : 'Inactif'}
-                  </Badge>
-                </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-                <Separator />
+        {/* ── Profil ─────────────────────────────────────────────────────── */}
+        <div className="space-y-4">
+          <Card className="border-0 shadow-sm">
+            <CardContent className="pt-5 pb-4">
 
-                {/* Informations de contact */}
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <Mail className="h-4 w-4 text-muted-foreground" />
-                    <div className="flex-1">
-                      <div className="font-medium">{client.email}</div>
-                      <div className="text-xs text-muted-foreground">Email</div>
-                    </div>
-                    <Button variant="ghost" size="sm" onClick={handleCopyEmail}>
-                      <Copy className="h-3 w-3" />
-                    </Button>
+              {/* Avatar + rang */}
+              <div className="text-center mb-5">
+                <div className="relative inline-block">
+                  <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto text-white text-2xl font-bold shadow-lg ${isVip ? 'bg-gradient-to-br from-yellow-400 to-orange-500' : 'bg-gradient-to-br from-blue-500 to-indigo-600'}`}>
+                    {(client.full_name || client.email || '?')[0].toUpperCase()}
                   </div>
-                  
-                  {client.phone && (
-                    <div className="flex items-center gap-3">
-                      <Phone className="h-4 w-4 text-muted-foreground" />
-                      <div className="flex-1">
-                        <div className="font-medium">{client.phone}</div>
-                        <div className="text-xs text-muted-foreground">Téléphone</div>
-                      </div>
-                    </div>
-                  )}
-                  
-                  {client.company && (
-                    <div className="flex items-center gap-3">
-                      <Building className="h-4 w-4 text-muted-foreground" />
-                      <div className="flex-1">
-                        <div className="font-medium">{client.company}</div>
-                        <div className="text-xs text-muted-foreground">Entreprise</div>
-                      </div>
-                    </div>
-                  )}
-                  
-                  {client.address && (
-                    <div className="flex items-center gap-3">
-                      <MapPin className="h-4 w-4 text-muted-foreground" />
-                      <div className="flex-1">
-                        <div className="font-medium text-sm">{client.address}</div>
-                        <div className="text-xs text-muted-foreground">Adresse</div>
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className="flex items-center gap-3">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <div className="flex-1">
-                      <div className="font-medium">{formatDateTime(client.created_at)}</div>
-                      <div className="text-xs text-muted-foreground">Inscription</div>
-                    </div>
-                  </div>
-                    {client.created_by_user_info && (
-                      <div className="flex items-center gap-3 mt-2">
-                        <Users className="h-4 w-4 text-muted-foreground" />
-                        <div className="flex-1">
-                          <div className="font-medium">Créé par {client.created_by_user_info.name || client.created_by_user_info.id}</div>
-                          <div className="text-xs text-muted-foreground">{client.created_by_user_info.email}</div>
-                        </div>
-                      </div>
-                    )}
-
-                    {client.updated_by_user_info && (
-                      <div className="flex items-center gap-3 mt-2">
-                        <Edit className="h-4 w-4 text-muted-foreground" />
-                        <div className="flex-1">
-                          <div className="font-medium">Dernière modification par {client.updated_by_user_info.name || client.updated_by_user_info.id}</div>
-                          <div className="text-xs text-muted-foreground">{client.updated_by_user_info.email}</div>
-                        </div>
-                      </div>
-                    )}
-                  
-                  {client.last_login_at && (
-                    <div className="flex items-center gap-3">
-                      <Activity className="h-4 w-4 text-muted-foreground" />
-                      <div className="flex-1">
-                        <div className="font-medium">{formatRelativeTime(client.last_login_at)}</div>
-                        <div className="text-xs text-muted-foreground">Dernière connexion</div>
-                      </div>
+                  {rank && (
+                    <div className={`absolute -bottom-1 -right-1 w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold border-2 border-white shadow ${isVip ? 'bg-yellow-400 text-yellow-900' : 'bg-gray-100 text-gray-600'}`}>
+                      #{rank}
                     </div>
                   )}
                 </div>
-                
-                {client.notes && (
-                  <>
-                    <Separator />
-                    <div>
-                      <div className="text-sm font-medium mb-2">Notes internes</div>
-                      <div className="text-sm text-muted-foreground bg-muted p-3 rounded-lg">
-                        {client.notes}
-                      </div>
-                    </div>
-                  </>
+                <h2 className="text-base font-bold text-gray-800 mt-3">{client.full_name || '—'}</h2>
+                {rank && (
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {isVip ? '🏆 Top 3 clients' : isGood ? '⭐ Top 10 clients' : `Rang #${rank}`}
+                  </p>
                 )}
               </div>
-            </CardContent>
-          </Card>
 
-          {/* Carte Engagement */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Target className="h-5 w-5" />
-                Engagement
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Taux de conversion</span>
-                  <span className="font-bold">{clientStats?.conversionRate.toFixed(1)}%</span>
-                </div>
-                <Progress value={clientStats?.conversionRate || 0} className="h-2" />
-              </div>
-              
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Fidélité</span>
-                  <span className="font-bold">{clientStats?.daysAsClient} jour{clientStats?.daysAsClient !== 1 ? 's' : ''}</span>
-                </div>
-                <Progress value={Math.min((clientStats?.daysAsClient || 0) / 365 * 100, 100)} className="h-2" />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4 pt-2">
-                <div className="text-center p-3 bg-blue-50 rounded-lg">
-                  <div className="text-2xl font-bold text-blue-600">{clientStats?.activeCarts || 0}</div>
-                  <div className="text-xs text-muted-foreground">Paniers actifs</div>
-                </div>
-                <div className="text-center p-3 bg-purple-50 rounded-lg">
-                  <div className="text-2xl font-bold text-purple-600">{clientStats?.messagesCount || 0}</div>
-                  <div className="text-xs text-muted-foreground">Messages</div>
-                </div>
+              {/* Coordonnées */}
+              <div className="space-y-2 text-sm">
+                {[
+                  { icon: Mail,     val: client.email || '—' },
+                  { icon: Phone,    val: client.phone || '—' },
+                  { icon: Calendar, val: client.created_at ? `Depuis le ${format(new Date(client.created_at), 'dd/MM/yyyy')}` : '—' },
+                ].map(({ icon: Icon, val }) => (
+                  <div key={val} className="flex items-center gap-2 text-gray-600">
+                    <Icon className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                    <span className="text-xs truncate">{val}</span>
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>
-        </div>
 
-        {/* Colonne droite : Données et analytics */}
-        <div className="lg:col-span-2 space-y-6">
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid grid-cols-4">
-              <TabsTrigger value="overview" className="gap-2">
-                <BarChart3 className="h-4 w-4" />
-                Vue d'ensemble
-              </TabsTrigger>
-              <TabsTrigger value="orders" className="gap-2">
-                <ShoppingCart className="h-4 w-4" />
-                Commandes ({orders.length})
-              </TabsTrigger>
-              <TabsTrigger value="carts" className="gap-2">
-                <Package className="h-4 w-4" />
-                Paniers ({carts.length})
-              </TabsTrigger>
-              <TabsTrigger value="messages" className="gap-2">
-                <MessageSquare className="h-4 w-4" />
-                Messages ({messages.length})
-              </TabsTrigger>
-            </TabsList>
-
-            {/* Vue d'ensemble */}
-            <TabsContent value="overview" className="space-y-6">
-              {/* Cartes de statistiques financières */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <DollarSign className="h-4 w-4 text-green-600" />
-                      Chiffre d'affaires total
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-3xl font-bold text-green-700">
-                      {clientStats?.totalRevenue.toLocaleString()} FCFA
-                    </div>
-                    <div className="text-sm text-muted-foreground mt-2">
-                      {clientStats?.totalOrders} commande{clientStats?.totalOrders !== 1 ? 's' : ''}
-                    </div>
-                  </CardContent>
-                </Card>
-                
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-blue-600" />
-                      Ce mois-ci
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">
-                      {clientStats?.currentMonthRevenue.toLocaleString()} FCFA
-                    </div>
-                    <div className="flex items-center gap-2 mt-2">
-                      {clientStats?.revenueGrowth >= 0 ? (
-                        <TrendingUp className="h-4 w-4 text-green-600" />
-                      ) : (
-                        <TrendingUp className="h-4 w-4 text-red-600 rotate-180" />
-                      )}
-                      <span className={`text-sm ${clientStats?.revenueGrowth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {Math.abs(clientStats?.revenueGrowth || 0).toFixed(1)}% vs mois dernier
+          {/* Top produits */}
+          {topProducts?.length > 0 && (
+            <Card className="border-0 shadow-sm">
+              <CardHeader className="pb-2 pt-4 px-4">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Package className="w-4 h-4 text-orange-500" />
+                  Produits favoris
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-4 pb-4">
+                <div className="space-y-2.5">
+                  {topProducts.map((p: any, i: number) => (
+                    <div key={p.name} className="flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-gray-100 text-gray-500 text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                        {i + 1}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-gray-800 truncate">{p.name}</p>
+                        <p className="text-[10px] text-gray-400">{p.nb_orders} cmd · ×{p.total_qty}</p>
+                      </div>
+                      <span className="text-xs font-bold text-primary whitespace-nowrap">
+                        {fmtCfa(p.total_amount)}
                       </span>
                     </div>
-                  </CardContent>
-                </Card>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Évolution mensuelle */}
+          {monthly?.length > 0 && (
+            <Card className="border-0 shadow-sm">
+              <CardHeader className="pb-2 pt-4 px-4">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-blue-500" />
+                  Évolution (12 mois)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-4 pb-4">
+                <div className="space-y-1.5">
+                  {(() => {
+                    const maxRev = Math.max(...monthly.map((m: any) => parseFloat(m.revenue)));
+                    return monthly.slice(-6).map((m: any) => {
+                      const rev = parseFloat(m.revenue);
+                      const pct = maxRev > 0 ? (rev / maxRev) * 100 : 0;
+                      const [y, mo] = m.month.split('-');
+                      const label = format(new Date(Number(y), Number(mo) - 1, 1), 'MMM', { locale: fr });
+                      return (
+                        <div key={m.month} className="flex items-center gap-2">
+                          <span className="text-[10px] text-gray-400 w-8 text-right capitalize">{label}</span>
+                          <div className="flex-1 h-4 bg-gray-100 rounded overflow-hidden">
+                            <div
+                              className="h-full bg-primary/70 rounded transition-all"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] font-medium text-gray-700 w-20 text-right whitespace-nowrap">
+                            {rev > 0 ? fmtCfa(rev) : '—'}
+                          </span>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* ── Colonne droite ──────────────────────────────────────────────── */}
+        <div className="lg:col-span-2 space-y-4">
+
+          {/* KPIs */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              {
+                label: 'CA total',
+                value: fmtCfa(summary.totalSpent),
+                icon: <TrendingUp className="w-5 h-5 text-green-600" />,
+                bg: 'bg-green-50 border-green-100',
+                text: 'text-green-700',
+              },
+              {
+                label: 'Commandes',
+                value: summary.totalOrders,
+                sub: `${summary.completedCount} complétées`,
+                icon: <ShoppingCart className="w-5 h-5 text-blue-600" />,
+                bg: 'bg-blue-50 border-blue-100',
+                text: 'text-blue-700',
+              },
+              {
+                label: 'Panier moyen',
+                value: fmtCfa(summary.avgOrder),
+                icon: <Package className="w-5 h-5 text-purple-600" />,
+                bg: 'bg-purple-50 border-purple-100',
+                text: 'text-purple-700',
+              },
+              {
+                label: 'Ce mois',
+                value: fmtCfa(summary.thisMonthRevenue),
+                sub: (() => {
+                  const g = summary.growth;
+                  if (!summary.lastMonthRevenue) return null;
+                  return g >= 0
+                    ? `+${g.toFixed(0)}% vs mois dernier`
+                    : `${g.toFixed(0)}% vs mois dernier`;
+                })(),
+                subColor: summary.growth >= 0 ? 'text-green-600' : 'text-red-500',
+                icon: summary.growth >= 0
+                  ? <TrendingUp   className="w-5 h-5 text-orange-500" />
+                  : <TrendingDown className="w-5 h-5 text-red-500" />,
+                bg: 'bg-orange-50 border-orange-100',
+                text: 'text-orange-700',
+              },
+            ].map((s) => (
+              <Card key={s.label} className={`border ${s.bg} shadow-none`}>
+                <CardContent className="pt-3 pb-3 px-4">
+                  <div className="flex items-start justify-between mb-1">
+                    <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wide leading-tight">{s.label}</span>
+                    {s.icon}
+                  </div>
+                  <p className={`text-base font-bold leading-tight ${s.text}`}>{s.value}</p>
+                  {s.sub && <p className={`text-[10px] mt-0.5 ${(s as any).subColor || 'text-gray-400'}`}>{s.sub}</p>}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Barre récapitulative statuts */}
+          <div className="flex items-center gap-3 bg-white border border-gray-100 rounded-xl p-3 shadow-sm text-xs">
+            {[
+              { key: 'completedCount', label: 'Complétées', color: 'bg-green-500' },
+              { key: 'pendingCount',   label: 'En attente', color: 'bg-amber-400' },
+              { key: 'cancelledCount', label: 'Annulées',   color: 'bg-red-400'   },
+            ].map(({ key, label, color }) => (
+              <div key={key} className="flex items-center gap-1.5">
+                <div className={`w-2.5 h-2.5 rounded-full ${color}`} />
+                <span className="text-gray-500">{label}</span>
+                <span className="font-bold text-gray-800">{summary[key]}</span>
               </div>
+            ))}
+            <div className="ml-auto flex items-center gap-1.5">
+              <span className="text-gray-400">Taux de complétion</span>
+              <span className="font-bold text-gray-800">
+                {summary.totalOrders > 0 ? Math.round((summary.completedCount / summary.totalOrders) * 100) : 0}%
+              </span>
+            </div>
+          </div>
 
-              {/* Dernières commandes */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <ShoppingCart className="h-5 w-5" />
-                    Dernières commandes
-                  </CardTitle>
-                  <CardDescription>
-                    {orders.length} commande{orders.length !== 1 ? 's' : ''} au total
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {orders.slice(0, 3).map(order => (
-                      <div 
-                        key={order.id} 
-                        className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
-                        onClick={() => handleViewOrder(order.id)}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                            <ShoppingCart className="h-5 w-5 text-primary" />
-                          </div>
-                          <div>
-                            <div className="font-medium">
-                              Commande #{order.order_number || order.id.substring(0, 8)}
-                            </div>
-                            <div className="text-sm text-muted-foreground">
-                              {formatDateTime(order.created_at)}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="font-bold">
-                            {Number(order.total_amount || 0).toLocaleString()} FCFA
-                          </div>
-                          <Badge 
-                            variant="outline" 
-                            className={`${getStatusColor(order.status)} text-xs mt-1`}
-                          >
-                            {order.status || 'En attente'}
-                          </Badge>
-                        </div>
-                      </div>
-                    ))}
-                    
-                    {orders.length === 0 && (
-                      <div className="text-center py-8 text-muted-foreground">
-                        Aucune commande pour ce client
-                      </div>
-                    )}
-                    
-                    {orders.length > 3 && (
-                      <div className="text-center pt-2">
-                        <Button variant="ghost" size="sm" onClick={() => setActiveTab('orders')}>
-                          Voir toutes les commandes ({orders.length})
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+          {/* Historique des commandes */}
+          <Card className="border-0 shadow-sm">
+            <CardHeader className="pb-2 pt-4 px-4">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <ShoppingCart className="w-4 h-4 text-blue-500" />
+                Historique des commandes
+                <Badge variant="secondary" className="ml-auto text-[10px]">{orders.length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {orders.length === 0 ? (
+                <div className="text-center py-10 text-gray-300">
+                  <ShoppingCart className="w-10 h-10 mx-auto mb-2" />
+                  <p className="text-sm text-gray-400">Aucune commande</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {orders.map((o: any) => {
+                    const cfg = STATUS_CFG[o.status] || { label: o.status, color: 'bg-gray-100 text-gray-500 border-gray-200', icon: <Minus className="w-3 h-3" /> };
+                    const expanded = expandedOrder === o.id;
+                    const items: any[] = o.items || [];
 
-              {/* Paniers actifs */}
-              {clientStats?.activeCarts > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Package className="h-5 w-5" />
-                      Paniers actifs ({clientStats.activeCarts})
-                    </CardTitle>
-                    <CardDescription>
-                      Paniers en cours d'achat
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      {carts.filter(cart => {
-                        const lastActivity = new Date(cart.last_activity_at || cart.updated_at);
-                        return differenceInHours(new Date(), lastActivity) <= 2;
-                      }).slice(0, 3).map(cart => {
-                        const status = getCartStatus(cart);
-                        return (
-                          <div key={cart.id} className="flex items-center justify-between p-3 border rounded-lg">
-                            <div>
-                              <div className="font-medium">Panier {cart.id.substring(0, 8)}...</div>
-                              <div className="text-sm text-muted-foreground">
-                                Dernière activité: {formatRelativeTime(cart.last_activity_at || cart.updated_at)}
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="font-bold">
-                                {Number(cart.total_amount || 0).toLocaleString()} FCFA
-                              </div>
-                              <Badge variant="outline" className={`${status.color} text-xs mt-1`}>
-                                {status.label}
-                              </Badge>
-                            </div>
+                    return (
+                      <div key={o.id} className="hover:bg-gray-50 transition-colors">
+                        {/* Ligne principale */}
+                        <button
+                          className="w-full text-left px-4 py-3 flex items-center gap-3"
+                          onClick={() => setExpandedOrder(expanded ? null : o.id)}
+                        >
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center border flex-shrink-0 ${cfg.color}`}>
+                            {cfg.icon}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold text-gray-800">{fmtShort(o.placed_at)}</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded border ${cfg.color}`}>{cfg.label}</span>
+                              {o.traite_par && <span className="text-[10px] text-gray-400 hidden sm:inline">par {o.traite_par}</span>}
+                            </div>
+                            <p className="text-[10px] text-gray-400 font-mono mt-0.5">#{o.id.slice(0, 8).toUpperCase()}</p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className="text-sm font-bold text-gray-900">{fmtCfa(o.total_amount)}</span>
+                            {items.length > 0 && (
+                              expanded
+                                ? <ChevronUp   className="w-4 h-4 text-gray-400" />
+                                : <ChevronDown className="w-4 h-4 text-gray-400" />
+                            )}
+                          </div>
+                        </button>
+
+                        {/* Détail articles (accordéon) */}
+                        {expanded && items.length > 0 && (
+                          <div className="px-4 pb-3 bg-gray-50/60">
+                            <div className="border border-gray-100 rounded-lg overflow-hidden">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow className="bg-gray-100">
+                                    <TableHead className="text-[10px] py-1.5">Produit / Service</TableHead>
+                                    <TableHead className="text-[10px] py-1.5 text-right">Qté</TableHead>
+                                    <TableHead className="text-[10px] py-1.5 text-right">P.U.</TableHead>
+                                    <TableHead className="text-[10px] py-1.5 text-right">Total</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {items.map((item: any, i: number) => (
+                                    <TableRow key={i} className="text-[10px]">
+                                      <TableCell className="py-1.5 font-medium">{item.name}</TableCell>
+                                      <TableCell className="py-1.5 text-right text-gray-600">{item.qty}</TableCell>
+                                      <TableCell className="py-1.5 text-right text-gray-600">{fmtCfa(item.unit_price)}</TableCell>
+                                      <TableCell className="py-1.5 text-right font-bold">{fmtCfa(item.total)}</TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
+                            {o.cancel_reason && (
+                              <p className="text-[10px] text-red-500 mt-1.5 flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3" />Motif annulation : {o.cancel_reason}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
-            </TabsContent>
-
-            {/* Commandes complètes */}
-            <TabsContent value="orders">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Historique des commandes</CardTitle>
-                  <CardDescription>
-                    {orders.length} commande{orders.length !== 1 ? 's' : ''} • Total: {clientStats?.totalRevenue.toLocaleString()} FCFA
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Commande</TableHead>
-                          <TableHead>Date</TableHead>
-                          <TableHead>Articles</TableHead>
-                          <TableHead>Statut</TableHead>
-                          <TableHead className="text-right">Total</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {orders.map(order => (
-                          <TableRow key={order.id} className="hover:bg-muted/50">
-                            <TableCell>
-                              <div className="font-medium">#{order.order_number || order.id.substring(0, 8)}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {order.items?.length || 0} article{order.items?.length !== 1 ? 's' : ''}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {formatDateTime(order.created_at)}
-                            </TableCell>
-                            <TableCell>
-                              {order.items?.slice(0, 2).map((item: any) => item.name).join(', ')}
-                              {order.items?.length > 2 && ` +${order.items.length - 2}`}
-                            </TableCell>
-                            <TableCell>
-                              <Badge 
-                                variant="outline" 
-                                className={`${getStatusColor(order.status)}`}
-                              >
-                                {order.status === 'completed' ? 'Terminée' :
-                                 order.status === 'pending' ? 'En attente' :
-                                 order.status === 'shipped' ? 'Expédiée' :
-                                 order.status === 'cancelled' ? 'Annulée' : order.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right font-bold">
-                              {Number(order.total_amount || 0).toLocaleString()} FCFA
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleViewOrder(order.id)}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                        
-                        {orders.length === 0 && (
-                          <TableRow>
-                            <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                              Aucune commande pour ce client
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* Paniers */}
-            <TabsContent value="carts">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Historique des paniers</CardTitle>
-                  <CardDescription>
-                    {carts.length} panier{carts.length !== 1 ? 's' : ''} • {clientStats?.activeCarts} actif{clientStats?.activeCarts !== 1 ? 's' : ''}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Panier</TableHead>
-                          <TableHead>Dernière activité</TableHead>
-                          <TableHead>Articles</TableHead>
-                          <TableHead>Valeur</TableHead>
-                          <TableHead>Statut</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {carts.map(cart => {
-                          const status = getCartStatus(cart);
-                          const items = cart.items || [];
-                          
-                          return (
-                            <TableRow key={cart.id}>
-                              <TableCell className="font-mono text-sm">
-                                {cart.id.substring(0, 12)}...
-                              </TableCell>
-                              <TableCell>
-                                <div className="text-sm">{formatDateTime(cart.last_activity_at || cart.updated_at)}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  {formatRelativeTime(cart.last_activity_at || cart.updated_at)}
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                {items.slice(0, 2).map((item: any) => item.name).join(', ')}
-                                {items.length > 2 && ` +${items.length - 2}`}
-                              </TableCell>
-                              <TableCell className="font-bold">
-                                {Number(cart.total_amount || 0).toLocaleString()} FCFA
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className={status.color}>
-                                  {status.label}
-                                </Badge>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                        
-                        {carts.length === 0 && (
-                          <TableRow>
-                            <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                              Aucun panier pour ce client
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* Messages */}
-            <TabsContent value="messages">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Messages de contact</CardTitle>
-                  <CardDescription>
-                    {messages.length} message{messages.length !== 1 ? 's' : ''} envoyé{messages.length !== 1 ? 's' : ''}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {messages.map(message => (
-                      <Card key={message.id}>
-                        <CardContent className="pt-6">
-                          <div className="flex items-start justify-between mb-3">
-                            <div>
-                              <div className="font-bold">{message.subject}</div>
-                              <div className="text-sm text-muted-foreground">
-                                {formatDateTime(message.created_at)}
-                              </div>
-                            </div>
-                            <Badge variant={message.handled ? "default" : "destructive"}>
-                              {message.handled ? 'Traité' : 'Non traité'}
-                            </Badge>
-                          </div>
-                          <div className="bg-muted p-4 rounded-lg text-sm whitespace-pre-wrap">
-                            {message.message}
-                          </div>
-                          {message.metadata && (
-                            <div className="mt-3 text-xs text-muted-foreground">
-                              IP: {message.metadata.ip_address || 'N/A'} • 
-                              Page: {message.metadata.page_url || 'N/A'}
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    ))}
-                    
-                    {messages.length === 0 && (
-                      <div className="text-center py-12 text-muted-foreground">
-                        Aucun message envoyé par ce client
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
+            </CardContent>
+          </Card>
         </div>
       </div>
+
+      {/* ── Dialog modifier ──────────────────────────────────────────────── */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Edit className="w-4 h-4" /> Modifier le client
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {[
+              { id: 'fn',  label: 'Nom complet', field: 'full_name', type: 'text' },
+              { id: 'em',  label: 'Email',        field: 'email',     type: 'email' },
+              { id: 'ph',  label: 'Téléphone',    field: 'phone',     type: 'tel' },
+            ].map(({ id: fid, label, field, type }) => (
+              <div key={fid}>
+                <Label htmlFor={fid} className="text-sm">{label}</Label>
+                <Input
+                  id={fid}
+                  type={type}
+                  className="mt-1"
+                  value={(editForm as any)[field]}
+                  onChange={e => setEditForm(p => ({ ...p, [field]: e.target.value }))}
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>Annuler</Button>
+            <Button onClick={handleEdit}>Enregistrer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog supprimer ─────────────────────────────────────────────── */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-700">
+              <AlertTriangle className="w-5 h-5" /> Désactiver le client
+            </DialogTitle>
+            <DialogDescription>
+              Le client <strong>{client.full_name}</strong> sera désactivé.
+              Ses commandes passées restent conservées. Impossible si des commandes sont en attente.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>Annuler</Button>
+            <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={handleDelete}>
+              Confirmer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

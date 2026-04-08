@@ -1,619 +1,338 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
-  Card, 
-  CardContent, 
-  CardHeader, 
-  CardTitle, 
-  CardDescription,
-  CardFooter
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Progress } from '@/components/ui/progress';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import { apiFetch } from '@/lib/api';
-import { format, differenceInHours, differenceInDays } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { 
-  ArrowLeft, 
-  Activity, 
-  User, 
-  Mail, 
-  Phone, 
-  Calendar, 
-  Shield, 
-  Lock, 
-  Unlock, 
-  Edit,
-  Trash2,
-  MoreVertical,
-  RefreshCw,
-  Eye,
-  FileText,
-  ShoppingCart,
-  MessageSquare,
-  Package,
-  CreditCard,
-  TrendingUp,
-  Clock,
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
-  ExternalLink,
-  Copy,
-  Send,
-  BarChart3
+import {
+  ArrowLeft, RefreshCw, User, Mail, Phone, Shield, ShoppingCart,
+  Package, TrendingDown, Activity, Clock, CheckCircle2, XCircle,
+  AlertTriangle, Wifi, WifiOff, BarChart3, Edit, Trash2,
+  Calendar, Tag, FileText, ChevronRight, Zap, History, RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const fmtDate = (d: string) =>
+  d ? format(new Date(d), 'dd/MM/yyyy HH:mm', { locale: fr }) : '—';
+
+const fmtRel = (d: string) =>
+  d ? formatDistanceToNow(new Date(d), { locale: fr, addSuffix: true }) : '—';
+
+const fmtMontant = (v: number | string) =>
+  Number(v).toLocaleString('fr-FR') + ' FCFA';
+
+const STATUS_ORDER: Record<string, { label: string; color: string }> = {
+  pending:    { label: 'En attente',  color: 'bg-amber-100  text-amber-800  border-amber-200'  },
+  processing: { label: 'En cours',    color: 'bg-blue-100   text-blue-800   border-blue-200'   },
+  completed:  { label: 'Complétée',   color: 'bg-green-100  text-green-800  border-green-200'  },
+  cancelled:  { label: 'Annulée',     color: 'bg-red-100    text-red-800    border-red-200'    },
+};
+
+const STATUS_DEP: Record<string, { label: string; color: string }> = {
+  en_attente: { label: 'En attente', color: 'bg-amber-100 text-amber-800'  },
+  valide:     { label: 'Validée',    color: 'bg-green-100 text-green-800'  },
+  rejete:     { label: 'Rejetée',    color: 'bg-red-100   text-red-800'    },
+  annule:     { label: 'Annulée',    color: 'bg-gray-100  text-gray-500'   },
+};
+
+const TIMELINE_ICONS: Record<string, React.ReactNode> = {
+  order_created: <ShoppingCart  className="w-3.5 h-3.5 text-blue-600"    />,
+  stock:         <Package       className="w-3.5 h-3.5 text-orange-600"  />,
+  depense:       <TrendingDown  className="w-3.5 h-3.5 text-red-500"     />,
+  action:        <Zap           className="w-3.5 h-3.5 text-purple-500"  />,
+};
+
+// ─── Composant principal ──────────────────────────────────────────────────────
 
 const UserDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [user, setUser] = useState<any | null>(null);
-  const [logs, setLogs] = useState<any[]>([]);
-  const [orders, setOrders] = useState<any[]>([]);
-  const [carts, setCarts] = useState<any[]>([]);
-  const [messages, setMessages] = useState<any[]>([]);
+
+  const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview');
-  const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
-  const [sendingNotification, setSendingNotification] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [period, setPeriod] = useState('7');
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Statistiques calculées
-  const userStats = useMemo(() => {
-    if (!user) return null;
+  // ─── Chargement données ─────────────────────────────────────────────────
 
-    // revenue generated by this employee: sum of total_amount for orders completed by this user
-    const revenueHandled = orders.reduce((sum, order) => {
-      try {
-        if (String(order.status) !== 'completed') return sum;
-        const metadata = order.metadata || {};
-        const traiter = Array.isArray(metadata?.traiter_par)
-          ? metadata.traiter_par
-          : (typeof metadata === 'string' ? (JSON.parse(metadata || '{}').traiter_par || []) : []);
-
-        if (Array.isArray(traiter) && traiter.some((t: any) => String(t.user_id) === String(id) && String(t.action) === 'completed')) {
-          return sum + Number(order.total_amount || 0);
-        }
-      } catch (e) {
-        // ignore parse errors
-      }
-      return sum;
-    }, 0);
-
-    return {
-      totalOrders: orders.length,
-      totalSpent: orders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0),
-      revenueHandled,
-      activeCarts: carts.filter(c => {
-        const lastActivity = new Date(c.last_activity_at || c.updated_at);
-        return differenceInHours(new Date(), lastActivity) <= 2;
-      }).length,
-      messagesCount: messages.length,
-      lastSeen: user.last_login ? new Date(user.last_login) : null,
-      daysSinceRegistration: user.created_at ? 
-        differenceInDays(new Date(), new Date(user.created_at)) : 0,
-      avgOrderValue: orders.length > 0 ? 
-        orders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0) / orders.length : 0,
-    };
-  }, [user, orders, carts, messages, id]);
-
-  const fetchUserData = async () => {
+  const fetchActivity = useCallback(async (showSpinner = false) => {
     if (!id) return;
-    
-    setLoading(true);
+    if (showSpinner) setRefreshing(true);
     try {
-      const token = localStorage.getItem('sessionToken');
-      const headers: any = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      // 1. Fetch user details
-      try {
-        // Try direct endpoint first
-        const userResp = await apiFetch(`/api/admin/users/${id}`, { headers });
-        if (userResp.ok) {
-          const userData = await userResp.json();
-          setUser(userData.data || userData);
-        } else {
-          // Fallback to list endpoint
-          const listResp = await apiFetch('/api/admin/users', { headers });
-          if (listResp.ok) {
-            const payload = await listResp.json();
-            const foundUser = (payload.data || []).find((x: any) => x.id === id);
-            setUser(foundUser || null);
-          }
-        }
-      } catch (err) {
-        console.error('Error fetching user:', err);
-      }
-
-      // 2. Fetch user logs
-      try {
-        const logsResp = await apiFetch('/api/admin/users/logs', { headers });
-        if (logsResp.ok) {
-          const logsData = await logsResp.json();
-          const filteredLogs = (logsData.data || []).filter((log: any) => {
-            try {
-              if (log.user_id && log.user_id === id) return true;
-              const meta = typeof log.metadata === 'string' ? JSON.parse(log.metadata || '{}') : (log.metadata || {});
-              if (meta.user_id && meta.user_id === id) return true;
-              if (user && user.email && log.user_email === user.email) return true;
-            } catch (e) {
-              return false;
-            }
-            return false;
-          });
-          setLogs(filteredLogs.sort((a: any, b: any) => 
-            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          ));
-        }
-      } catch (err) {
-        console.error('Error fetching logs:', err);
-      }
-
-      // 3. Fetch user orders (include orders the user handled via metadata.traiter_par)
-      try {
-        const ordersResp = await apiFetch('/api/admin/orders', { headers });
-        if (ordersResp.ok) {
-          const ordersData = await ordersResp.json();
-          const userOrders = (ordersData.data || []).filter((order: any) => {
-            try {
-              if (order.user_id === id) return true;
-              if (order.customer_email && user?.email && order.customer_email === user.email) return true;
-
-              // metadata may be object or string; try to access traiter_par array
-              const metadata = order.metadata || {};
-              const traiter = Array.isArray(metadata?.traiter_par)
-                ? metadata.traiter_par
-                : (typeof metadata === 'string' ? (JSON.parse(metadata || '{}').traiter_par || []) : []);
-
-              if (Array.isArray(traiter) && traiter.some((t: any) => String(t.user_id) === String(id))) return true;
-            } catch (e) {
-              // ignore parse errors and continue
-            }
-            return false;
-          });
-          setOrders(userOrders.sort((a: any, b: any) => 
-            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          ));
-        }
-      } catch (err) {
-        console.error('Error fetching orders:', err);
-      }
-
-      // 4. Fetch user carts
-      try {
-        const cartsResp = await apiFetch('/api/admin/carts', { headers });
-        if (cartsResp.ok) {
-          const cartsData = await cartsResp.json();
-          const userCarts = (cartsData.data || []).filter((cart: any) => 
-            cart.user_id === id || cart.user?.id === id
-          );
-          setCarts(userCarts);
-        }
-      } catch (err) {
-        console.error('Error fetching carts:', err);
-      }
-
-      // 5. Fetch user messages
-      try {
-        const messagesResp = await apiFetch('/api/contacts', { headers });
-        if (messagesResp.ok) {
-          const messagesData = await messagesResp.json();
-          const userMessages = (messagesData.results || messagesData.data || []).filter((msg: any) => 
-            msg.email === user?.email
-          );
-          setMessages(userMessages);
-        }
-      } catch (err) {
-        console.error('Error fetching messages:', err);
-      }
-
-    } catch (err) {
-      console.error('Error in fetchUserData:', err);
-      toast.error('❌ Erreur lors du chargement des données');
+      const r = await apiFetch(`/api/admin/users/${id}/activity?days=${period}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const body = await r.json();
+      setData(body);
+    } catch (e) {
+      // ne pas afficher d'erreur sur les refreshes silencieux
+      if (showSpinner) toast.error('Impossible de charger les données');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  };
+  }, [id, period]);
 
   useEffect(() => {
-    fetchUserData();
-    
-    // Setup refresh interval (every 10 seconds)
-    const interval = setInterval(fetchUserData, 10000);
-    setRefreshInterval(interval);
-    
-    return () => {
-      if (refreshInterval) clearInterval(refreshInterval);
-    };
-  }, [id]);
+    setLoading(true);
+    fetchActivity();
+    // Rafraîchissement automatique toutes les 15 s
+    intervalRef.current = setInterval(() => fetchActivity(false), 15000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [fetchActivity]);
 
-  const handleRefresh = () => {
-    fetchUserData();
-    toast.info('🔄 Actualisation des données...');
-  };
+  // ─── Actions admin ──────────────────────────────────────────────────────
 
-  const handleToggleStatus = async () => {
-    if (!user) return;
-    
+  const toggleStatus = async () => {
+    if (!data?.user) return;
     try {
-      const token = localStorage.getItem('sessionToken');
-      const resp = await apiFetch(`/api/admin/users/${user.id}`, {
+      const r = await apiFetch(`/api/admin/users/${id}`, {
         method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({ is_active: !user.is_active })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !data.user.is_active }),
       });
-
-      if (!resp.ok) throw new Error('Erreur lors de la mise à jour');
-
-      toast.success(`✅ Utilisateur ${!user.is_active ? 'activé' : 'désactivé'}`, {
-        description: `Le statut a été modifié avec succès`
-      });
-
-      fetchUserData();
-      setStatusDialogOpen(false);
-    } catch (err) {
-      console.error(err);
-      toast.error('❌ Erreur lors de la modification du statut');
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!user) return;
-    
-    try {
-      const token = localStorage.getItem('sessionToken');
-      const resp = await apiFetch(`/api/admin/users/${user.id}`, { 
-        method: 'DELETE',
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
-      
-      if (!resp.ok) throw new Error('Erreur lors de la suppression');
-      
-      toast.success('🗑️ Utilisateur supprimé', {
-        description: 'Redirection vers la liste des utilisateurs'
-      });
-      
-      setTimeout(() => navigate('/admin/users'), 1500);
-    } catch (err) {
-      console.error(err);
-      toast.error('❌ Impossible de supprimer l\'utilisateur');
-    } finally {
-      setDeleteDialogOpen(false);
-    }
-  };
-
-  const handleSendNotification = async () => {
-    if (!user) return;
-    
-    setSendingNotification(true);
-    try {
-      // Simuler l'envoi d'une notification
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      toast.success('📨 Notification envoyée', {
-        description: `Un email a été envoyé à ${user.email}`
-      });
-    } catch (err) {
-      toast.error('❌ Erreur lors de l\'envoi');
-    } finally {
-      setSendingNotification(false);
-    }
-  };
-
-  const handleCopyEmail = () => {
-    if (!user?.email) return;
-    navigator.clipboard.writeText(user.email);
-    toast.success('📋 Email copié dans le presse-papier');
-  };
-
-  const formatDateTime = (dateString: string) => {
-    try {
-      const date = new Date(dateString);
-      return format(date, "dd MMM yyyy 'à' HH:mm", { locale: fr });
+      if (!r.ok) throw new Error();
+      toast.success(`Employé ${data.user.is_active ? 'désactivé' : 'activé'}`);
+      setStatusOpen(false);
+      fetchActivity(true);
     } catch {
-      return "Date invalide";
+      toast.error('Erreur lors de la modification du statut');
     }
   };
 
-  const formatRelativeTime = (dateString: string) => {
+  const deleteUser = async () => {
+    if (!data?.user) return;
     try {
-      const date = new Date(dateString);
-      const now = new Date();
-      const hours = differenceInHours(now, date);
-      
-      if (hours < 1) return "Il y a moins d'une heure";
-      if (hours < 24) return `Il y a ${hours} heure${hours > 1 ? 's' : ''}`;
-      
-      const days = differenceInDays(now, date);
-      if (days === 1) return "Hier";
-      if (days < 7) return `Il y a ${days} jour${days > 1 ? 's' : ''}`;
-      
-      return format(date, "dd/MM/yyyy", { locale: fr });
+      const r = await apiFetch(`/api/admin/users/${id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error();
+      toast.success('Employé supprimé (statut = supprimé)');
+      navigate('/admin/users');
     } catch {
-      return "";
+      toast.error('Impossible de supprimer cet employé');
+    } finally {
+      setDeleteOpen(false);
     }
   };
 
-  const getRoleColor = (role: string) => {
-    switch (role) {
-      case 'admin':
-        return 'bg-red-100 text-red-800 border-red-200';
-      case 'moderator':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'staff':
-        return 'bg-purple-100 text-purple-800 border-purple-200';
-      case 'customer':
-        return 'bg-green-100 text-green-800 border-green-200';
-      default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+  const restoreUser = async () => {
+    if (!data?.user) return;
+    try {
+      const r = await apiFetch(`/api/admin/users/${id}/restore`, { method: 'POST' });
+      if (!r.ok) throw new Error();
+      toast.success('Compte restauré avec succès');
+      fetchActivity(true);
+    } catch {
+      toast.error('Impossible de restaurer ce compte');
     }
   };
 
-  const getRoleIcon = (role: string) => {
-    switch (role) {
-      case 'admin':
-        return <Shield className="h-4 w-4" />;
-      case 'moderator':
-        return <User className="h-4 w-4" />;
-      default:
-        return <User className="h-4 w-4" />;
-    }
-  };
+  // ─── Skeleton de chargement ─────────────────────────────────────────────
 
-  if (loading && !user) {
+  if (loading) {
     return (
-      <div className="p-6 space-y-6">
-        <div className="flex items-center gap-3">
-          <Skeleton className="h-10 w-32" />
-          <Skeleton className="h-10 w-64" />
-        </div>
+      <div className="p-6 space-y-6 max-w-6xl mx-auto">
+        <Skeleton className="h-8 w-48" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <Skeleton className="h-96" />
-          <Skeleton className="h-96 lg:col-span-2" />
+          <Skeleton className="h-64" />
+          <div className="lg:col-span-2 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24" />)}
+            </div>
+            <Skeleton className="h-80" />
+          </div>
         </div>
       </div>
     );
   }
 
-  if (!user) {
+  if (!data?.user) {
     return (
-      <div className="p-6 text-center">
-        <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
-          <User className="h-8 w-8 text-gray-400" />
-        </div>
-        <h2 className="text-2xl font-bold mb-2">Utilisateur introuvable</h2>
-        <p className="text-muted-foreground mb-6">L'utilisateur avec l'ID "{id}" n'existe pas ou a été supprimé.</p>
-        <Button onClick={() => navigate('/admin/users')}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Retour à la liste
+      <div className="p-10 text-center">
+        <User className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+        <h2 className="text-xl font-bold text-gray-700 mb-2">Employé introuvable</h2>
+        <Button variant="outline" onClick={() => navigate('/admin/users')}>
+          <ArrowLeft className="w-4 h-4 mr-2" /> Retour
         </Button>
       </div>
     );
   }
 
+  const { user, isOnline, lastSeenAt, summary, timeline, ordersCreated, ordersHandled, stockMouvements, depenses, userActions = [] } = data;
+  const roles: string[] = user.role_name ? [user.role_name] : [];
+  const isActive = user.is_active !== false;
+  const isSupprime = user.status === 'supprimé';
+
+  // ─── Rendu ──────────────────────────────────────────────────────────────
+
   return (
-    <div className="space-y-6 p-4">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Button variant="outline" onClick={() => navigate('/admin/users')}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Retour
+    <div className="p-4 md:p-6 space-y-6 max-w-6xl mx-auto">
+
+      {/* En-tête */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={() => navigate('/admin/users')}>
+            <ArrowLeft className="w-4 h-4 mr-1" /> Retour
           </Button>
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Détails de l'utilisateur</h1>
-            <p className="text-muted-foreground mt-1">
-              ID: {id} • Surveillance en temps réel
-            </p>
+            <h1 className="text-xl font-bold text-gray-900">Fiche employé</h1>
+            <p className="text-xs text-gray-400 font-mono">{id}</p>
           </div>
         </div>
-        
         <div className="flex items-center gap-2">
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={handleRefresh}
-          >
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Actualiser
+          <Select value={period} onValueChange={setPeriod}>
+            <SelectTrigger className="h-8 text-xs w-36">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1">Aujourd'hui</SelectItem>
+              <SelectItem value="7">7 derniers jours</SelectItem>
+              <SelectItem value="30">30 derniers jours</SelectItem>
+              <SelectItem value="90">3 mois</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" onClick={() => fetchActivity(true)} disabled={refreshing}>
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </Button>
-          
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => toast.info("Modification de l'utilisateur")}>
-                <Edit className="mr-2 h-4 w-4" />
-                Modifier
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleSendNotification} disabled={sendingNotification}>
-                <Send className="mr-2 h-4 w-4" />
-                Envoyer un email
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleCopyEmail}>
-                <Copy className="mr-2 h-4 w-4" />
-                Copier l'email
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setStatusDialogOpen(true)}>
-                {user.is_active ? (
-                  <>
-                    <Lock className="mr-2 h-4 w-4" />
-                    Désactiver le compte
-                  </>
-                ) : (
-                  <>
-                    <Unlock className="mr-2 h-4 w-4" />
-                    Activer le compte
-                  </>
-                )}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem 
-                onClick={() => setDeleteDialogOpen(true)}
-                className="text-destructive"
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Supprimer l'utilisateur
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Colonne gauche : Informations utilisateur */}
-        <div className="space-y-6">
-          {/* Carte Profil */}
-          <Card>
-            <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50">
-              <CardTitle className="flex items-center gap-3">
-                <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xl font-bold">
-                  {user.name?.[0]?.toUpperCase() || 'U'}
-                </div>
-                <div>
-                  <div className="text-xl font-bold">{user.name || 'Non renseigné'}</div>
-                  <div className="text-sm text-muted-foreground">{user.email}</div>
-                </div>
-              </CardTitle>
-            </CardHeader>
+
+        {/* ── Profil ─────────────────────────────────────────────────────── */}
+        <div className="lg:col-span-1 space-y-4">
+          <Card className="border-0 shadow-sm">
             <CardContent className="pt-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Badge 
-                      variant="outline" 
-                      className={`${getRoleColor(user.role)} gap-1`}
+              {/* Avatar + statut online */}
+              <div className="text-center mb-5">
+                <div className="relative inline-block">
+                  <div className="w-20 h-20 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center mx-auto text-white text-2xl font-bold shadow-lg">
+                    {(user.full_name || user.name || user.email || '?')[0].toUpperCase()}
+                  </div>
+                  <span className={`absolute bottom-0.5 right-0.5 w-4 h-4 rounded-full border-2 border-white ${isOnline ? 'bg-green-500' : 'bg-gray-300'}`} />
+                </div>
+                <h2 className="text-lg font-bold text-gray-900 mt-3">{user.full_name || user.name || '—'}</h2>
+                <div className="flex items-center justify-center gap-1.5 mt-1">
+                  {isOnline
+                    ? <><Wifi className="w-3 h-3 text-green-500" /><span className="text-xs text-green-600 font-medium">En ligne</span></>
+                    : <><WifiOff className="w-3 h-3 text-gray-400" /><span className="text-xs text-gray-400">{lastSeenAt ? `Vu ${fmtRel(lastSeenAt)}` : 'Hors ligne'}</span></>
+                  }
+                </div>
+              </div>
+
+              {/* Badges statut + rôle */}
+              <div className="flex flex-wrap justify-center gap-2 mb-5">
+                {isSupprime ? (
+                  <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium bg-gray-100 text-gray-500 border-gray-200">
+                    <Trash2 className="w-3 h-3" /> Supprimé
+                  </span>
+                ) : (
+                  <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium ${isActive ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
+                    {isActive ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                    {isActive ? 'Actif' : 'Inactif'}
+                  </span>
+                )}
+                {roles.map(r => (
+                  <span key={r} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border bg-purple-100 text-purple-700 border-purple-200">
+                    <Shield className="w-3 h-3" />{r}
+                  </span>
+                ))}
+              </div>
+
+              {/* Coordonnées */}
+              <div className="space-y-2.5 text-sm">
+                {[
+                  { icon: Mail,     val: user.email },
+                  { icon: Phone,    val: user.phone || '—' },
+                  { icon: Calendar, val: user.created_at ? `Depuis le ${format(new Date(user.created_at), 'dd/MM/yyyy')}` : '—' },
+                ].map(({ icon: Icon, val }) => (
+                  <div key={val} className="flex items-center gap-2 text-gray-600">
+                    <Icon className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <span className="truncate text-xs">{val}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Actions */}
+              <div className="mt-5 space-y-2">
+                {isSupprime ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-xs text-green-700 border-green-200 hover:bg-green-50"
+                    onClick={restoreUser}
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 mr-1.5 text-green-600" /> Restaurer le compte
+                  </Button>
+                ) : (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full text-xs"
+                      onClick={() => setStatusOpen(true)}
                     >
-                      {getRoleIcon(user.role)}
-                      {user.role === 'admin' ? 'Administrateur' : 
-                       user.role === 'moderator' ? 'Modérateur' : 
-                       user.role === 'staff' ? 'Staff' : 'Client'}
-                    </Badge>
-                    
-                    <Badge variant={user.is_active ? "default" : "destructive"}>
-                      {user.is_active ? 'Actif' : 'Inactif'}
-                    </Badge>
-                  </div>
-                  
-                  {user.last_login && (
-                    <div className="text-xs text-muted-foreground">
-                      Vu {formatRelativeTime(user.last_login)}
-                    </div>
-                  )}
-                </div>
-
-                <Separator />
-
-                {/* Informations de contact */}
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <Mail className="h-4 w-4 text-muted-foreground" />
-                    <div className="flex-1">
-                      <div className="font-medium">{user.email}</div>
-                      <div className="text-xs text-muted-foreground">Email</div>
-                    </div>
-                    <Button variant="ghost" size="sm" onClick={handleCopyEmail}>
-                      <Copy className="h-3 w-3" />
+                      {isActive ? <><XCircle className="w-3.5 h-3.5 mr-1.5 text-amber-500" />Désactiver</>
+                                : <><CheckCircle2 className="w-3.5 h-3.5 mr-1.5 text-green-500" />Activer</>}
                     </Button>
-                  </div>
-                  
-                  {user.phone && (
-                    <div className="flex items-center gap-3">
-                      <Phone className="h-4 w-4 text-muted-foreground" />
-                      <div className="flex-1">
-                        <div className="font-medium">{user.phone}</div>
-                        <div className="text-xs text-muted-foreground">Téléphone</div>
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className="flex items-center gap-3">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <div className="flex-1">
-                      <div className="font-medium">{formatDateTime(user.created_at)}</div>
-                      <div className="text-xs text-muted-foreground">
-                        Inscrit {userStats?.daysSinceRegistration} jour{userStats?.daysSinceRegistration !== 1 ? 's' : ''}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full text-xs text-red-600 border-red-200 hover:bg-red-50"
+                      onClick={() => setDeleteOpen(true)}
+                    >
+                      <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Supprimer
+                    </Button>
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>
 
-          {/* Carte Statistiques */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <BarChart3 className="h-5 w-5" />
-                Statistiques
+          {/* Timeline 7 derniers jours */}
+          <Card className="border-0 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Activity className="w-4 h-4 text-purple-500" />
+                Activité récente
+                <span className="ml-auto text-xs font-normal text-gray-400">7 jours</span>
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Commandes totales</span>
-                  <span className="font-bold">{userStats?.totalOrders || 0}</span>
-                </div>
-                <Progress value={Math.min((userStats?.totalOrders || 0) * 10, 100)} className="h-2" />
-              </div>
-              
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Montant total dépensé</span>
-                  <span className="font-bold">{userStats?.totalSpent?.toLocaleString() || 0} FCFA</span>
-                </div>
-                <Progress value={Math.min((userStats?.totalSpent || 0) / 10000, 100)} className="h-2" />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4 pt-2">
-                <div className="text-center p-3 bg-blue-50 rounded-lg">
-                  <div className="text-2xl font-bold text-blue-600">{userStats?.activeCarts || 0}</div>
-                  <div className="text-xs text-muted-foreground">Paniers actifs</div>
-                </div>
-                <div className="text-center p-3 bg-green-50 rounded-lg">
-                  <div className="text-2xl font-bold text-green-600">{userStats?.messagesCount || 0}</div>
-                  <div className="text-xs text-muted-foreground">Messages</div>
-                </div>
-              </div>
-              <div className="pt-3">
-                <div className="text-center p-3 bg-yellow-50 rounded-lg">
-                  <div className="text-2xl font-bold text-yellow-600">{(userStats?.revenueHandled || 0).toLocaleString()} FCFA</div>
-                  <div className="text-xs text-muted-foreground">Généré (commandes terminées)</div>
-                </div>
-              </div>
-              
-              {userStats?.avgOrderValue > 0 && (
-                <div className="text-center p-3 bg-purple-50 rounded-lg">
-                  <div className="text-sm font-medium text-purple-700">
-                    Panier moyen: {userStats.avgOrderValue.toLocaleString()} FCFA
+            <CardContent className="p-0">
+              {timeline.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-6">Aucune activité</p>
+              ) : (
+                <div className="relative">
+                  {/* Ligne verticale */}
+                  <div className="absolute left-7 top-0 bottom-0 w-px bg-gray-100" />
+                  <div className="space-y-0 max-h-72 overflow-y-auto">
+                    {timeline.slice(0, 20).map((item: any, i: number) => (
+                      <div key={i} className="flex gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors">
+                        <div className="w-6 h-6 rounded-full bg-white border border-gray-200 flex items-center justify-center flex-shrink-0 z-10 shadow-sm">
+                          {TIMELINE_ICONS[item.type] || <Zap className="w-3 h-3 text-gray-400" />}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-gray-800 leading-tight">{item.label}</p>
+                          <p className="text-[10px] text-gray-400 mt-0.5">{fmtRel(item.at)}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -621,350 +340,285 @@ const UserDetail = () => {
           </Card>
         </div>
 
-        {/* Colonne droite : Onglets de données */}
-        <div className="lg:col-span-2 space-y-6">
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid grid-cols-5">
-              <TabsTrigger value="overview" className="gap-2">
-                <Activity className="h-4 w-4" />
-                <span className="hidden sm:inline">Vue d'ensemble</span>
+        {/* ── Colonne droite ──────────────────────────────────────────────── */}
+        <div className="lg:col-span-2 space-y-5">
+
+          {/* Cartes de statistiques */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              {
+                label: 'Commandes créées',
+                value: summary.ordersCreatedCount,
+                icon: <ShoppingCart className="w-5 h-5 text-blue-600" />,
+                bg: 'bg-blue-50 border-blue-100',
+                text: 'text-blue-700',
+              },
+              {
+                label: 'Commandes traitées',
+                value: summary.ordersHandledCount,
+                icon: <CheckCircle2 className="w-5 h-5 text-green-600" />,
+                bg: 'bg-green-50 border-green-100',
+                text: 'text-green-700',
+              },
+              {
+                label: 'Mouvements stock',
+                value: summary.stockMouvementsCount,
+                sub: `${summary.stockSortiesCount} sortie${summary.stockSortiesCount > 1 ? 's' : ''} · ${summary.stockEntreesCount} entrée${summary.stockEntreesCount > 1 ? 's' : ''}`,
+                icon: <Package className="w-5 h-5 text-orange-600" />,
+                bg: 'bg-orange-50 border-orange-100',
+                text: 'text-orange-700',
+              },
+              {
+                label: 'Dépenses déclarées',
+                value: summary.depensesCount,
+                sub: summary.totalDepensesValide > 0 ? fmtMontant(summary.totalDepensesValide) : undefined,
+                icon: <TrendingDown className="w-5 h-5 text-red-600" />,
+                bg: 'bg-red-50 border-red-100',
+                text: 'text-red-700',
+              },
+            ].map((s) => (
+              <Card key={s.label} className={`border ${s.bg} shadow-none`}>
+                <CardContent className="pt-4 pb-3 px-4">
+                  <div className="flex items-start justify-between mb-1">
+                    <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wide leading-tight">{s.label}</span>
+                    {s.icon}
+                  </div>
+                  <p className={`text-2xl font-bold ${s.text}`}>{s.value}</p>
+                  {s.sub && <p className="text-[10px] text-gray-400 mt-0.5">{s.sub}</p>}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Onglets détaillés */}
+          <Tabs defaultValue="commandes">
+            <TabsList className="h-8 text-xs">
+              <TabsTrigger value="commandes" className="text-xs px-3">
+                <ShoppingCart className="w-3.5 h-3.5 mr-1.5" />
+                Commandes
+                {ordersCreated.length > 0 && <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">{ordersCreated.length}</Badge>}
               </TabsTrigger>
-              <TabsTrigger value="logs" className="gap-2">
-                <FileText className="h-4 w-4" />
-                <span className="hidden sm:inline">Logs</span>
+              <TabsTrigger value="traitees" className="text-xs px-3">
+                <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+                Traitées
+                {ordersHandled.length > 0 && <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">{ordersHandled.length}</Badge>}
               </TabsTrigger>
-              <TabsTrigger value="orders" className="gap-2">
-                <ShoppingCart className="h-4 w-4" />
-                <span className="hidden sm:inline">Commandes</span>
+              <TabsTrigger value="stock" className="text-xs px-3">
+                <Package className="w-3.5 h-3.5 mr-1.5" />
+                Stock
               </TabsTrigger>
-              <TabsTrigger value="carts" className="gap-2">
-                <Package className="h-4 w-4" />
-                <span className="hidden sm:inline">Paniers</span>
+              <TabsTrigger value="depenses" className="text-xs px-3">
+                <TrendingDown className="w-3.5 h-3.5 mr-1.5" />
+                Dépenses
               </TabsTrigger>
-              <TabsTrigger value="messages" className="gap-2">
-                <MessageSquare className="h-4 w-4" />
-                <span className="hidden sm:inline">Messages</span>
+              <TabsTrigger value="historique" className="text-xs px-3">
+                <History className="w-3.5 h-3.5 mr-1.5" />
+                Historique
+                {userActions.length > 0 && <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">{userActions.length}</Badge>}
               </TabsTrigger>
             </TabsList>
 
-            {/* Vue d'ensemble */}
-            <TabsContent value="overview" className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Activity className="h-5 w-5" />
-                    Activité récente
-                  </CardTitle>
-                  <CardDescription>
-                    Dernières actions de l'utilisateur
-                  </CardDescription>
+            {/* ── Commandes créées ── */}
+            <TabsContent value="commandes" className="mt-3">
+              <Card className="border-0 shadow-sm">
+                <CardHeader className="pb-2 pt-4 px-4">
+                  <CardTitle className="text-sm text-gray-700">Commandes créées par {user.full_name || user.name}</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {logs.slice(0, 5).map((log, index) => (
-                      <div key={log.id} className="flex items-start gap-3 p-3 hover:bg-muted/50 rounded-lg">
-                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                          {index === 0 && <TrendingUp className="h-4 w-4 text-primary" />}
-                          {index === 1 && <Eye className="h-4 w-4 text-blue-500" />}
-                          {index === 2 && <FileText className="h-4 w-4 text-green-500" />}
-                          {index > 2 && <Activity className="h-4 w-4 text-gray-500" />}
-                        </div>
-                        <div className="flex-1">
-                          <div className="font-medium">{log.action}</div>
-                          <div className="text-sm text-muted-foreground">
-                            {formatDateTime(log.created_at)}
-                          </div>
-                        </div>
-                        <Badge variant="outline" className="text-xs">
-                          {log.action_type || 'action'}
-                        </Badge>
-                      </div>
-                    ))}
-                    
-                    {logs.length === 0 && (
-                      <div className="text-center py-8 text-muted-foreground">
-                        Aucune activité enregistrée
-                      </div>
-                    )}
-                  </div>
+                <CardContent className="p-0">
+                  <OrderTable rows={ordersCreated} empty="Aucune commande créée sur cette période" />
                 </CardContent>
               </Card>
+            </TabsContent>
 
-              {/* Dernières commandes */}
-              {orders.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <ShoppingCart className="h-5 w-5" />
-                      Dernières commandes
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {orders.slice(0, 3).map(order => (
-                        <div key={order.id} className="flex items-center justify-between p-3 border rounded-lg">
-                          <div>
-                            <div className="font-medium">Commande #{order.order_number || order.id.substring(0, 8)}</div>
-                            <div className="text-sm text-muted-foreground">
-                              {formatDateTime(order.created_at)} • {Number(order.total_amount).toLocaleString()} FCFA
-                            </div>
-                          </div>
-                          <Badge variant={
-                            order.status === 'completed' ? 'default' :
-                            order.status === 'pending' ? 'secondary' : 'outline'
-                          }>
-                            {order.status || 'En attente'}
-                          </Badge>
-                        </div>
-                      ))}
+            {/* ── Commandes traitées ── */}
+            <TabsContent value="traitees" className="mt-3">
+              <Card className="border-0 shadow-sm">
+                <CardHeader className="pb-2 pt-4 px-4">
+                  <CardTitle className="text-sm text-gray-700">Commandes traitées / modifiées</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <OrderTable rows={ordersHandled} empty="Aucune commande traitée sur cette période" />
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* ── Mouvements stock ── */}
+            <TabsContent value="stock" className="mt-3">
+              <Card className="border-0 shadow-sm">
+                <CardHeader className="pb-2 pt-4 px-4">
+                  <CardTitle className="text-sm text-gray-700">Mouvements de stock</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {stockMouvements.length === 0 ? (
+                    <EmptyState icon={<Package className="w-8 h-8" />} label="Aucun mouvement de stock" />
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-gray-50 text-xs">
+                            <TableHead className="text-xs">Date</TableHead>
+                            <TableHead className="text-xs">Produit</TableHead>
+                            <TableHead className="text-xs">Type</TableHead>
+                            <TableHead className="text-xs text-right">Qté</TableHead>
+                            <TableHead className="text-xs">Référence</TableHead>
+                            <TableHead className="text-xs">Statut</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {stockMouvements.map((s: any) => (
+                            <TableRow key={s.id} className="text-xs hover:bg-gray-50">
+                              <TableCell className="text-gray-500 whitespace-nowrap">{fmtDate(s.created_at)}</TableCell>
+                              <TableCell className="font-medium max-w-[140px] truncate">{s.product_name || '—'}</TableCell>
+                              <TableCell>
+                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${s.movement_type === 'out' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                                  {s.movement_type === 'out' ? '↓ Sortie' : '↑ Entrée'}
+                                  {s.movement_subtype && ` · ${s.movement_subtype}`}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right font-bold">{s.quantity}</TableCell>
+                              <TableCell className="text-gray-400 text-[10px]">{s.reference || '—'}</TableCell>
+                              <TableCell>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${s.status === 'voided' ? 'bg-gray-100 text-gray-400' : 'bg-green-100 text-green-700'}`}>
+                                  {s.status === 'voided' ? 'Annulé' : 'Actif'}
+                                </span>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
                     </div>
-                  </CardContent>
-                </Card>
-              )}
+                  )}
+                </CardContent>
+              </Card>
             </TabsContent>
 
-            {/* Logs détaillés */}
-            <TabsContent value="logs">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Historique des actions</CardTitle>
-                  <CardDescription>
-                    {logs.length} action{logs.length !== 1 ? 's' : ''} enregistrée{logs.length !== 1 ? 's' : ''} • Mise à jour en direct
-                  </CardDescription>
+            {/* ── Dépenses ── */}
+            <TabsContent value="depenses" className="mt-3">
+              <Card className="border-0 shadow-sm">
+                <CardHeader className="pb-2 pt-4 px-4">
+                  <CardTitle className="text-sm text-gray-700">Dépenses déclarées</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Date/Heure</TableHead>
-                          <TableHead>Action</TableHead>
-                          <TableHead>Type</TableHead>
-                          <TableHead>IP</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {logs.map((log) => {
-                          const metadata = typeof log.metadata === 'string' 
-                            ? JSON.parse(log.metadata || '{}') 
-                            : (log.metadata || {});
-                          
+                <CardContent className="p-0">
+                  {depenses.length === 0 ? (
+                    <EmptyState icon={<TrendingDown className="w-8 h-8" />} label="Aucune dépense déclarée" />
+                  ) : (
+                    <>
+                      {/* Résumé rapide */}
+                      <div className="grid grid-cols-3 gap-3 p-4 bg-gray-50 border-b text-center text-xs">
+                        {(['en_attente', 'valide', 'rejete'] as const).map(st => {
+                          const items = depenses.filter((d: any) => d.statut === st);
+                          const total = items.reduce((s: number, d: any) => s + parseFloat(d.montant || 0), 0);
+                          const cfg = STATUS_DEP[st];
                           return (
-                            <TableRow key={log.id}>
-                              <TableCell className="text-sm">
-                                {formatDateTime(log.created_at)}
-                              </TableCell>
-                              <TableCell>
-                                <div className="font-medium">{log.action}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  {metadata.details || metadata.message || '—'}
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className="text-xs">
-                                  {log.action_type || 'user'}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-xs font-mono">
-                                {metadata.ip_address || '—'}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                        
-                        {logs.length === 0 && (
-                          <TableRow>
-                            <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                              Aucun log disponible pour cet utilisateur
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* Commandes */}
-            <TabsContent value="orders">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Historique des commandes</CardTitle>
-                  <CardDescription>
-                    {orders.length} commande{orders.length !== 1 ? 's' : ''} • Total: {userStats?.totalSpent?.toLocaleString() || 0} FCFA
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Commande</TableHead>
-                          <TableHead>Date</TableHead>
-                          <TableHead>Montant</TableHead>
-                          <TableHead>Statut</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {orders.map(order => (
-                          <TableRow key={order.id}>
-                            <TableCell>
-                              <div className="font-medium">#{order.order_number || order.id.substring(0, 8)}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {order.items?.length || 0} article{order.items?.length !== 1 ? 's' : ''}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {formatDateTime(order.created_at)}
-                            </TableCell>
-                            <TableCell className="font-bold">
-                              {Number(order.total_amount).toLocaleString()} FCFA
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant={
-                                order.status === 'completed' ? 'default' :
-                                order.status === 'pending' ? 'secondary' :
-                                order.status === 'cancelled' ? 'destructive' : 'outline'
-                              }>
-                                {order.status === 'completed' ? 'Terminée' :
-                                 order.status === 'pending' ? 'En attente' :
-                                 order.status === 'cancelled' ? 'Annulée' : order.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => navigate(`/admin/orders`)}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                        
-                        {orders.length === 0 && (
-                          <TableRow>
-                            <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                              Aucune commande pour cet utilisateur
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* Paniers */}
-            <TabsContent value="carts">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Paniers actifs et abandonnés</CardTitle>
-                  <CardDescription>
-                    {carts.length} panier{carts.length !== 1 ? 's' : ''} • {userStats?.activeCarts || 0} actif{userStats?.activeCarts !== 1 ? 's' : ''}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>ID Panier</TableHead>
-                          <TableHead>Dernière activité</TableHead>
-                          <TableHead>Valeur</TableHead>
-                          <TableHead>Statut</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {carts.map(cart => {
-                          const lastActivity = new Date(cart.last_activity_at || cart.updated_at);
-                          const isActive = differenceInHours(new Date(), lastActivity) <= 2;
-                          
-                          return (
-                            <TableRow key={cart.id}>
-                              <TableCell className="font-mono text-sm">
-                                {cart.id.substring(0, 12)}...
-                              </TableCell>
-                              <TableCell>
-                                <div className="text-sm">{formatDateTime(cart.last_activity_at)}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  Il y a {differenceInHours(new Date(), lastActivity)}h
-                                </div>
-                              </TableCell>
-                              <TableCell className="font-bold">
-                                {Number(cart.total_amount || 0).toLocaleString()} FCFA
-                              </TableCell>
-                              <TableCell>
-                                {isActive ? (
-                                  <Badge className="bg-green-100 text-green-800 border-green-200">
-                                    Actif
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="destructive">
-                                    Abandonné
-                                  </Badge>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                        
-                        {carts.length === 0 && (
-                          <TableRow>
-                            <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                              Aucun panier pour cet utilisateur
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* Messages */}
-            <TabsContent value="messages">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Messages de contact</CardTitle>
-                  <CardDescription>
-                    {messages.length} message{messages.length !== 1 ? 's' : ''} envoyé{messages.length !== 1 ? 's' : ''} via le formulaire
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {messages.map(message => (
-                      <Card key={message.id}>
-                        <CardContent className="pt-6">
-                          <div className="flex items-start justify-between mb-3">
-                            <div>
-                              <div className="font-bold">{message.subject}</div>
-                              <div className="text-sm text-muted-foreground">
-                                {formatDateTime(message.created_at)}
-                              </div>
+                            <div key={st}>
+                              <p className="text-gray-400 mb-0.5">{cfg.label}</p>
+                              <p className="font-bold text-gray-800">{items.length}</p>
+                              <p className={`text-[10px] ${cfg.color} rounded px-1 inline-block`}>{fmtMontant(total)}</p>
                             </div>
-                            <Badge variant={message.handled ? "default" : "destructive"}>
-                              {message.handled ? 'Traité' : 'Non traité'}
-                            </Badge>
-                          </div>
-                          <div className="bg-muted p-4 rounded-lg text-sm whitespace-pre-wrap">
-                            {message.message}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                    
-                    {messages.length === 0 && (
-                      <div className="text-center py-12 text-muted-foreground">
-                        Aucun message envoyé par cet utilisateur
+                          );
+                        })}
                       </div>
-                    )}
-                  </div>
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-gray-50 text-xs">
+                              <TableHead className="text-xs">Date</TableHead>
+                              <TableHead className="text-xs">Description</TableHead>
+                              <TableHead className="text-xs">Catégorie</TableHead>
+                              <TableHead className="text-xs text-right">Montant</TableHead>
+                              <TableHead className="text-xs">Statut</TableHead>
+                              <TableHead className="text-xs">Validé le</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {depenses.map((d: any) => (
+                              <TableRow key={d.id} className="text-xs hover:bg-gray-50">
+                                <TableCell className="text-gray-500 whitespace-nowrap">{fmtDate(d.created_at)}</TableCell>
+                                <TableCell className="max-w-[150px] truncate font-medium" title={d.description}>{d.description}</TableCell>
+                                <TableCell>
+                                  <span className="inline-flex items-center gap-1 text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+                                    <Tag className="w-2.5 h-2.5" />{d.categorie}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-right font-bold">{fmtMontant(d.montant)}</TableCell>
+                                <TableCell>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${STATUS_DEP[d.statut]?.color || ''}`}>
+                                    {STATUS_DEP[d.statut]?.label || d.statut}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-gray-400 text-[10px]">
+                                  {d.validated_at ? <>{fmtRel(d.validated_at)}<br/><span className="text-gray-300">{d.validateur_name}</span></> : '—'}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+            {/* ── Historique des actions ── */}
+            <TabsContent value="historique" className="mt-3">
+              <Card className="border-0 shadow-sm">
+                <CardHeader className="pb-2 pt-4 px-4">
+                  <CardTitle className="text-sm text-gray-700 flex items-center gap-2">
+                    <History className="w-4 h-4 text-purple-500" />
+                    Journal des actions
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {userActions.length === 0 ? (
+                    <EmptyState icon={<History className="w-8 h-8" />} label="Aucune action enregistrée" />
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-gray-50 text-xs">
+                            <TableHead className="text-xs">Date</TableHead>
+                            <TableHead className="text-xs">Action</TableHead>
+                            <TableHead className="text-xs">Détails</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {userActions.map((a: any, i: number) => {
+                            const actionColors: Record<string, string> = {
+                              create_user:  'bg-green-100 text-green-700',
+                              update_user:  'bg-blue-100 text-blue-700',
+                              delete_user:  'bg-red-100 text-red-700',
+                              restore_user: 'bg-purple-100 text-purple-700',
+                            };
+                            const color = actionColors[a.action] || 'bg-gray-100 text-gray-600';
+                            const meta = typeof a.metadata === 'string' ? JSON.parse(a.metadata || '{}') : (a.metadata || {});
+                            return (
+                              <TableRow key={i} className="text-xs hover:bg-gray-50">
+                                <TableCell className="text-gray-500 whitespace-nowrap">{fmtDate(a.created_at)}</TableCell>
+                                <TableCell>
+                                  <span className={`inline-block text-[10px] px-2 py-0.5 rounded font-medium ${color}`}>
+                                    {a.action}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-gray-400 text-[10px] max-w-xs">
+                                  {meta.changes && Object.keys(meta.changes).length > 0
+                                    ? Object.entries(meta.changes).map(([k, v]: any) => (
+                                        <span key={k} className="mr-2">
+                                          <span className="font-medium text-gray-600">{k}:</span>{' '}
+                                          {typeof v === 'object' ? `${v.old ?? '—'} → ${v.new ?? '—'}` : String(v)}
+                                        </span>
+                                      ))
+                                    : meta.email || meta.deleted_by
+                                      ? JSON.stringify(meta).substring(0, 80)
+                                      : '—'
+                                  }
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -972,152 +626,44 @@ const UserDetail = () => {
         </div>
       </div>
 
-      {/* Dialog de confirmation de suppression */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
+      {/* ── Dialog : Changer statut ──────────────────────────────────── */}
+      <Dialog open={statusOpen} onOpenChange={setStatusOpen}>
+        <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Trash2 className="h-5 w-5 text-red-600" />
-              Supprimer l'utilisateur
+              {isActive ? <XCircle className="w-5 h-5 text-amber-500" /> : <CheckCircle2 className="w-5 h-5 text-green-500" />}
+              {isActive ? 'Désactiver' : 'Activer'} l'employé
             </DialogTitle>
             <DialogDescription>
-              Êtes-vous sûr de vouloir supprimer cet utilisateur définitivement ?
+              {isActive
+                ? `${user.full_name || user.email} ne pourra plus se connecter.`
+                : `${user.full_name || user.email} pourra à nouveau se connecter.`}
             </DialogDescription>
           </DialogHeader>
-          
-          <div className="space-y-4">
-            <div className="flex items-center gap-3 p-3 bg-muted rounded-lg">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold">
-                {user.name?.[0]?.toUpperCase() || 'U'}
-              </div>
-              <div>
-                <div className="font-bold">{user.name || 'Utilisateur'}</div>
-                <div className="text-sm text-muted-foreground">{user.email}</div>
-              </div>
-            </div>
-            
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5" />
-                <div className="text-sm text-red-700">
-                  ⚠️ Cette action est irréversible. Elle supprimera :
-                  <ul className="list-disc list-inside mt-2 space-y-1">
-                    <li>Le compte utilisateur</li>
-                    <li>L'historique des commandes ({userStats?.totalOrders || 0})</li>
-                    <li>Les paniers actifs ({userStats?.activeCarts || 0})</li>
-                    <li>Les messages de contact ({userStats?.messagesCount || 0})</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-          
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteDialogOpen(false)}
-            >
-              Annuler
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              Supprimer définitivement
+            <Button variant="outline" onClick={() => setStatusOpen(false)}>Annuler</Button>
+            <Button onClick={toggleStatus} className={isActive ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-green-600 hover:bg-green-700 text-white'}>
+              Confirmer
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Dialog de changement de statut */}
-      <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
-        <DialogContent>
+      {/* ── Dialog : Supprimer ───────────────────────────────────────── */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {user.is_active ? <Lock className="h-5 w-5 text-orange-600" /> : <Unlock className="h-5 w-5 text-green-600" />}
-              {user.is_active ? 'Désactiver' : 'Activer'} le compte
+            <DialogTitle className="flex items-center gap-2 text-red-700">
+              <AlertTriangle className="w-5 h-5" /> Supprimer l'employé
             </DialogTitle>
             <DialogDescription>
-              {user.is_active 
-                ? "L'utilisateur ne pourra plus se connecter à son compte."
-                : "L'utilisateur pourra de nouveau se connecter à son compte."
-              }
+              Le compte de <strong>{user.full_name || user.email}</strong> sera marqué comme <strong>supprimé</strong> (statut = supprimé, connexion bloquée). L'historique et toutes les données sont conservés. Un administrateur peut restaurer le compte.
             </DialogDescription>
           </DialogHeader>
-          
-          <div className="space-y-4">
-            <div className="p-4 border rounded-lg">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold">
-                    {user.name?.[0]?.toUpperCase() || 'U'}
-                  </div>
-                  <div>
-                    <div className="font-bold">{user.name || 'Utilisateur'}</div>
-                    <div className="text-sm text-muted-foreground">{user.email}</div>
-                  </div>
-                </div>
-                <Badge variant={user.is_active ? "default" : "destructive"}>
-                  {user.is_active ? 'Actif' : 'Inactif'}
-                </Badge>
-              </div>
-            </div>
-            
-            {user.is_active ? (
-              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="h-5 w-5 text-orange-600 mt-0.5" />
-                  <div className="text-sm text-orange-700">
-                    L'utilisateur ne pourra plus :
-                    <ul className="list-disc list-inside mt-2 space-y-1">
-                      <li>Se connecter à son compte</li>
-                      <li>Passer de nouvelles commandes</li>
-                      <li>Accéder à son historique</li>
-                    </ul>
-                    <p className="mt-2">Les commandes en cours seront toujours traitées.</p>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                <div className="flex items-start gap-3">
-                  <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
-                  <div className="text-sm text-green-700">
-                    L'utilisateur pourra de nouveau :
-                    <ul className="list-disc list-inside mt-2 space-y-1">
-                      <li>Se connecter à son compte</li>
-                      <li>Passer de nouvelles commandes</li>
-                      <li>Accéder à son historique complet</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-          
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setStatusDialogOpen(false)}
-            >
-              Annuler
-            </Button>
-            <Button
-              onClick={handleToggleStatus}
-              variant={user.is_active ? "destructive" : "default"}
-            >
-              {user.is_active ? (
-                <>
-                  <Lock className="mr-2 h-4 w-4" />
-                  Désactiver le compte
-                </>
-              ) : (
-                <>
-                  <Unlock className="mr-2 h-4 w-4" />
-                  Activer le compte
-                </>
-              )}
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>Annuler</Button>
+            <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={deleteUser}>
+              Supprimer définitivement
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1125,5 +671,51 @@ const UserDetail = () => {
     </div>
   );
 };
+
+// ─── Sous-composants ──────────────────────────────────────────────────────────
+
+const OrderTable = ({ rows, empty }: { rows: any[]; empty: string }) => {
+  if (rows.length === 0) return <EmptyState icon={<ShoppingCart className="w-8 h-8" />} label={empty} />;
+  return (
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-gray-50">
+            <TableHead className="text-xs">Date</TableHead>
+            <TableHead className="text-xs">Client</TableHead>
+            <TableHead className="text-xs text-right">Montant</TableHead>
+            <TableHead className="text-xs">Statut</TableHead>
+            <TableHead className="text-xs">Articles</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((o: any) => {
+            const cfg = STATUS_ORDER[o.status] || { label: o.status, color: 'bg-gray-100 text-gray-500' };
+            return (
+              <TableRow key={o.id} className="text-xs hover:bg-gray-50">
+                <TableCell className="text-gray-500 whitespace-nowrap">{o.placed_at ? format(new Date(o.placed_at), 'dd/MM/yy HH:mm') : '—'}</TableCell>
+                <TableCell className="font-medium max-w-[120px] truncate">{o.client_name || '—'}</TableCell>
+                <TableCell className="text-right font-bold">{Number(o.total_amount || 0).toLocaleString('fr-FR')} FCFA</TableCell>
+                <TableCell>
+                  <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded border ${cfg.color}`}>{cfg.label}</span>
+                </TableCell>
+                <TableCell className="text-gray-400">{o.nb_items ?? '—'}</TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+};
+
+const EmptyState = ({ icon, label }: { icon: React.ReactNode; label: string }) => (
+  <div className="text-center py-12 text-gray-300">
+    <div className="w-14 h-14 rounded-full bg-gray-50 flex items-center justify-center mx-auto mb-3">
+      {icon}
+    </div>
+    <p className="text-sm text-gray-400">{label}</p>
+  </div>
+);
 
 export default UserDetail;

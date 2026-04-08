@@ -465,6 +465,20 @@ const DashboardEmployer = () => {
             </CardContent>
           </Card>
         </Link>
+
+        <Link to="/admin/depenses">
+          <Card className="border-2 border-dashed border-muted hover:border-red-500/50 transition-all cursor-pointer hover:shadow-md">
+            <CardContent className="p-6 flex flex-col items-center justify-center text-center">
+              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mb-3">
+                <TrendingDown className="h-6 w-6 text-red-600" />
+              </div>
+              <h3 className="font-semibold text-lg">Dépenses</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Déclarer ou consulter les dépenses du jour
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
       </div>
 
       {/* Main Stats Cards */}

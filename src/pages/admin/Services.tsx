@@ -71,6 +71,7 @@ const ServicesPageImproved = () => {
     name: '',
     description: '',
     price: 0,
+    purchase_price: 0,
     duration_minutes: 0,
     category: 'general',
     is_active: true,
@@ -254,6 +255,7 @@ const ServicesPageImproved = () => {
       name: service.name || '',
       description: service.description || '',
       price: service.price || 0,
+      purchase_price: service.purchase_price || 0,
       duration_minutes: service.duration_minutes || 60,
       category: service.category || 'general',
       is_active: service.is_active !== false,
@@ -325,7 +327,7 @@ const ServicesPageImproved = () => {
       toast.success('Service supprimé');
       setOpenDeleteDialog(false);
       setServiceToDelete(null);
-      fetchServices();
+      fetchServices(false);
     } catch (e) { 
       console.error(e); 
       toast.error('Impossible de supprimer le service');
@@ -797,7 +799,7 @@ const ServicesPageImproved = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="price">Prix (F CFA) *</Label>
+                <Label htmlFor="price">Prix de vente (F CFA) *</Label>
                 <div className="relative">
                   <DollarSign className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                   <Input
@@ -810,6 +812,28 @@ const ServicesPageImproved = () => {
                     className="pl-9"
                   />
                 </div>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="purchase_price">Prix d'achat (F CFA)</Label>
+                <div className="relative">
+                  <TrendingUp className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                  <Input
+                    id="purchase_price"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={form.purchase_price}
+                    onChange={(e) => setForm({ ...form, purchase_price: Number(e.target.value) })}
+                    className="pl-9"
+                    placeholder="Coût d'achat"
+                  />
+                </div>
+                {form.purchase_price > 0 && form.price > 0 && (
+                  <p className="text-xs text-teal-600 font-medium">
+                    Marge : {formatCurrency(form.price - form.purchase_price)}
+                    {' '}({Math.round(((form.price - form.purchase_price) / form.price) * 100)}%)
+                  </p>
+                )}
               </div>
 
               <div className="grid gap-2">

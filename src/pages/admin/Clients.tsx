@@ -41,7 +41,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
-import { 
+import {
   Users,
   Plus,
   Search,
@@ -72,9 +72,12 @@ import {
   User,
   Shield,
   Activity,
-  ExternalLink
-  ,
-  AlertTriangle
+  ExternalLink,
+  AlertTriangle,
+  Crown,
+  Star,
+  ArrowUpDown,
+  Package
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Link } from 'react-router-dom';
@@ -95,6 +98,7 @@ const Clients = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [channelFilter, setChannelFilter] = useState('all');
+  const [sortBy, setSortBy] = useState<'revenue' | 'date'>('revenue');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [clientToDelete, setClientToDelete] = useState<any>(null);
@@ -126,7 +130,7 @@ const Clients = () => {
   useEffect(() => {
     filterAndSortClients();
     calculateStats();
-  }, [clients, searchQuery, statusFilter, channelFilter]);
+  }, [clients, searchQuery, statusFilter, channelFilter, sortBy]);
 
   const fetchClients = async () => {
     setLoading(true);
@@ -139,11 +143,7 @@ const Clients = () => {
       if (!resp.ok) throw new Error('Erreur lors du chargement des clients');
       
       const payload = await resp.json();
-      const sortedClients = (payload.data || []).sort((a: any, b: any) => 
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
-      
-      setClients(sortedClients);
+      setClients(payload.data || []);
     } catch (err) {
       console.error(err);
       toast.error('❌ Erreur lors du chargement des clients', {
@@ -177,6 +177,13 @@ const Clients = () => {
     // Filtre par canal
     if (channelFilter !== 'all') {
       filtered = filtered.filter(client => client.created_by_channel === channelFilter);
+    }
+
+    // Tri
+    if (sortBy === 'revenue') {
+      filtered.sort((a, b) => (Number(b.total_spent) || 0) - (Number(a.total_spent) || 0));
+    } else {
+      filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }
 
     setFilteredClients(filtered);
@@ -421,6 +428,34 @@ const Clients = () => {
     }
   };
 
+  const formatCFA = (amount: number) => {
+    if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(1)}M FCFA`;
+    if (amount >= 1_000) return `${(amount / 1_000).toFixed(0)}k FCFA`;
+    return `${amount.toLocaleString()} FCFA`;
+  };
+
+  // Rang dans la liste filtrée triée par CA
+  const getClientRank = (clientId: string): number => {
+    const byRevenue = [...clients]
+      .sort((a, b) => (Number(b.total_spent) || 0) - (Number(a.total_spent) || 0));
+    return byRevenue.findIndex(c => c.id === clientId) + 1;
+  };
+
+  const getRankBadge = (rank: number) => {
+    if (rank <= 0) return null;
+    if (rank <= 3) return (
+      <span className="inline-flex items-center gap-0.5 text-xs font-bold text-yellow-600 bg-yellow-50 border border-yellow-200 rounded-full px-1.5 py-0.5">
+        <Crown className="h-3 w-3" /> VIP #{rank}
+      </span>
+    );
+    if (rank <= 10) return (
+      <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-full px-1.5 py-0.5">
+        <Star className="h-3 w-3" /> Fidèle
+      </span>
+    );
+    return null;
+  };
+
   const getChannelColor = (channel: string) => {
     switch (channel) {
       case 'manual':
@@ -532,10 +567,10 @@ const Clients = () => {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Valeur totale</p>
-                <p className="text-3xl font-bold text-indigo-600">{clientsStats.totalValue.toLocaleString()} FCFA</p>
+                <p className="text-sm font-medium text-muted-foreground">CA total clients</p>
+                <p className="text-2xl font-bold text-indigo-600">{formatCFA(clientsStats.totalValue)}</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Chiffre d'affaires total
+                  Chiffre d'affaires cumulé
                 </p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-indigo-100 flex items-center justify-center">
@@ -566,6 +601,44 @@ const Clients = () => {
         </Card>
       </div>
 
+      {/* Top 3 VIP clients */}
+      {!loading && clients.length >= 3 && (() => {
+        const top3 = [...clients]
+          .filter(c => c.is_active && Number(c.total_spent) > 0)
+          .sort((a, b) => Number(b.total_spent) - Number(a.total_spent))
+          .slice(0, 3);
+        if (top3.length === 0) return null;
+        const medals = ['🥇', '🥈', '🥉'];
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {top3.map((c, i) => (
+              <Link key={c.id} to={`/admin/clients/${c.id}`}>
+                <Card className={`hover:shadow-md transition-shadow border-2 ${i === 0 ? 'border-yellow-300 bg-yellow-50/40' : i === 1 ? 'border-slate-300 bg-slate-50/40' : 'border-orange-200 bg-orange-50/30'}`}>
+                  <CardContent className="pt-4 pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="relative">
+                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg">
+                          {(c.full_name)?.[0]?.toUpperCase() || 'C'}
+                        </div>
+                        <span className="absolute -top-1 -right-1 text-base">{medals[i]}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold truncate text-sm">{c.full_name || 'Client'}</div>
+                        <div className="text-xs text-muted-foreground truncate">{c.email}</div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-sm font-bold text-indigo-600">{formatCFA(Number(c.total_spent))}</span>
+                          <span className="text-xs text-muted-foreground">· {c.total_orders} cmd</span>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        );
+      })()}
+
       {/* Search and Filters */}
       <Card>
         <CardContent className="pt-6">
@@ -579,8 +652,8 @@ const Clients = () => {
                 className="pl-10 h-11"
               />
             </div>
-            
-            <div className="flex gap-2">
+
+            <div className="flex gap-2 flex-wrap">
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger className="w-[160px] h-11">
                   <Filter className="mr-2 h-4 w-4" />
@@ -592,7 +665,7 @@ const Clients = () => {
                   <SelectItem value="inactive">Inactifs uniquement</SelectItem>
                 </SelectContent>
               </Select>
-              
+
               <Select value={channelFilter} onValueChange={setChannelFilter}>
                 <SelectTrigger className="w-[160px] h-11">
                   <Globe className="mr-2 h-4 w-4" />
@@ -607,9 +680,19 @@ const Clients = () => {
                 </SelectContent>
               </Select>
 
-              <Button 
-                variant="ghost" 
-                size="icon" 
+              <Button
+                variant={sortBy === 'revenue' ? 'default' : 'outline'}
+                size="sm"
+                className="h-11 gap-1.5"
+                onClick={() => setSortBy(s => s === 'revenue' ? 'date' : 'revenue')}
+              >
+                <ArrowUpDown className="h-4 w-4" />
+                {sortBy === 'revenue' ? 'Par CA' : 'Par date'}
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={fetchClients}
                 className="h-11 w-11"
                 disabled={loading}
@@ -678,10 +761,18 @@ const Clients = () => {
       {/* Clients Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Liste des clients</CardTitle>
-          <CardDescription>
-            {filteredClients.length} client{filteredClients.length !== 1 ? 's' : ''} trouvé{filteredClients.length !== 1 ? 's' : ''}
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Liste des clients</CardTitle>
+              <CardDescription>
+                {filteredClients.length} client{filteredClients.length !== 1 ? 's' : ''} trouvé{filteredClients.length !== 1 ? 's' : ''}
+                {' · '}
+                <span className="text-xs">
+                  {sortBy === 'revenue' ? 'Triés par chiffre d\'affaires' : 'Triés par date d\'inscription'}
+                </span>
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -735,8 +826,9 @@ const Clients = () => {
                       </TableHead>
                       <TableHead>Client</TableHead>
                       <TableHead>Contact</TableHead>
+                      <TableHead className="text-right">CA total</TableHead>
+                      <TableHead className="text-center">Commandes</TableHead>
                       <TableHead>Source</TableHead>
-                      <TableHead>Inscription</TableHead>
                       <TableHead>Statut</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
@@ -754,24 +846,28 @@ const Clients = () => {
                             />
                           </div>
                         </TableCell>
-                        
+
                         <TableCell>
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-semibold">
-                              {(client.full_name || client.name)?.[0]?.toUpperCase() || 'C'}
+                            <div className="relative">
+                              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-semibold">
+                                {(client.full_name || client.name)?.[0]?.toUpperCase() || 'C'}
+                              </div>
                             </div>
                             <div>
-                              <div className="font-medium">{client.full_name || client.name || 'Non renseigné'}</div>
-                              {client.company && (
-                                <div className="text-xs text-muted-foreground flex items-center gap-1">
-                                  <Building className="h-3 w-3" />
-                                  {client.company}
+                              <div className="font-medium flex items-center gap-1.5 flex-wrap">
+                                {client.full_name || client.name || 'Non renseigné'}
+                                {getRankBadge(getClientRank(client.id))}
+                              </div>
+                              {client.last_order_at && (
+                                <div className="text-xs text-muted-foreground">
+                                  Dernière cmd: {format(new Date(client.last_order_at), 'dd/MM/yy')}
                                 </div>
                               )}
                             </div>
                           </div>
                         </TableCell>
-                        
+
                         <TableCell>
                           <div className="space-y-1">
                             <div className="flex items-center gap-2 text-sm">
@@ -786,10 +882,30 @@ const Clients = () => {
                             )}
                           </div>
                         </TableCell>
-                        
+
+                        <TableCell className="text-right">
+                          <div className="font-semibold text-indigo-600">
+                            {Number(client.total_spent) > 0 ? formatCFA(Number(client.total_spent)) : <span className="text-muted-foreground text-xs">—</span>}
+                          </div>
+                          {Number(client.avg_order) > 0 && (
+                            <div className="text-xs text-muted-foreground">
+                              moy. {formatCFA(Number(client.avg_order))}
+                            </div>
+                          )}
+                        </TableCell>
+
+                        <TableCell className="text-center">
+                          <div className="flex flex-col items-center">
+                            <span className="font-semibold">{client.total_orders || 0}</span>
+                            {(client.pending_orders || 0) > 0 && (
+                              <span className="text-xs text-orange-600 font-medium">{client.pending_orders} en attente</span>
+                            )}
+                          </div>
+                        </TableCell>
+
                         <TableCell>
-                          <Badge 
-                            variant="outline" 
+                          <Badge
+                            variant="outline"
                             className={`${getChannelColor(client.created_by_channel)} gap-1`}
                           >
                             {getChannelIcon(client.created_by_channel)}
@@ -799,18 +915,7 @@ const Clients = () => {
                              client.created_by_channel === 'website' ? 'Site web' : client.created_by_channel}
                           </Badge>
                         </TableCell>
-                        
-                        <TableCell>
-                          <div className="text-sm">
-                            {formatDateTime(client.created_at)}
-                          </div>
-                          {client.last_order_date && (
-                            <div className="text-xs text-muted-foreground">
-                              Dernière commande: {format(new Date(client.last_order_date), 'dd/MM/yy')}
-                            </div>
-                          )}
-                        </TableCell>
-                        
+
                         <TableCell>
                           <div className="flex items-center gap-2">
                             {client.is_active ? (
