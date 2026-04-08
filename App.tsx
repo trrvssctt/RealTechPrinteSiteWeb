@@ -1,0 +1,212 @@
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { CartProvider } from "@/contexts/CartContext";
+import { Analytics } from "@/components/Analytics";
+import Header from "@/components/layout/Header";
+import Footer from "@/components/layout/Footer";
+import Home from "./pages/Home";
+import Category from "./pages/Category";
+import ProductDetail from "./pages/ProductDetail";
+import Cart from "./pages/Cart";
+import Contact from "./pages/Contact";
+import NotFound from "./pages/NotFound";
+import Auth from "./pages/Auth";
+import CustomFlocage from "./pages/CustomFlocage";
+import MentionsLegales from "./pages/MentionsLegales";
+import Confidentialite from "./pages/Confidentialite";
+import ConditionsGenerales from "./pages/ConditionsGenerales";
+import Cookies from "./pages/Cookies";
+import AdminLayout from "./components/admin/AdminLayout";
+import AdminOnly from "./components/admin/AdminOnly";
+import Dashboard from "./pages/admin/Dashboard";
+import Products from "./pages/admin/Products";
+import Categories from "./pages/admin/Categories";
+import Orders from "./pages/admin/Orders";
+import Testimonials from "./pages/admin/Testimonials";
+import ContactInfo from "./pages/admin/ContactInfo";
+import Contacts from "./pages/admin/Contacts";
+import AbandonedCarts from "./pages/admin/AbandonedCarts";
+import AdminUsers from "./pages/admin/Users";
+import Roles from "./pages/admin/Roles";
+import AdminLogin from "./pages/admin/AdminLogin";
+import EmployeeLogin from "./pages/admin/EmployeeLogin";
+import DashboardEmployer from "./pages/admin/DashboardEmployer";
+import Clients from "./pages/admin/Clients";
+import UserDetail from "./pages/admin/UserDetail";
+import ClientDetail from "./pages/admin/ClientDetail";
+import Stock from "./pages/admin/Stock";
+import Reports from "./pages/admin/Reports";
+import ServicesPage from "./pages/admin/Services";
+import ServiceDetails from "./pages/admin/ServiceDetails";
+import DepensesPage from "./pages/admin/Depenses";
+
+const queryClient = new QueryClient();
+
+const App = () => (
+  <QueryClientProvider client={queryClient}>
+    <TooltipProvider>
+      <BrowserRouter>
+        <CartProvider>
+          <Analytics />
+          <Toaster />
+          <Sonner />
+          <Routes>
+            {/* Public routes with Header/Footer */}
+            <Route path="/" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <Home />
+                </main>
+                <Footer />
+              </div>
+            } />
+            <Route path="/serigraphie" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <Category />
+                </main>
+                <Footer />
+              </div>
+            } />
+            <Route path="/flocage" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <Category />
+                </main>
+                <Footer />
+              </div>
+            } />
+            <Route path="/imprimantes" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <Category />
+                </main>
+                <Footer />
+              </div>
+            } />
+            <Route path="/produit/:id" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <ProductDetail />
+                </main>
+                <Footer />
+              </div>
+            } />
+            <Route path="/panier" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <Cart />
+                </main>
+                <Footer />
+              </div>
+            } />
+            <Route path="/contact" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <Contact />
+                </main>
+                <Footer />
+              </div>
+            } />
+            <Route path="/flocage-personnalise" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <CustomFlocage />
+                </main>
+                <Footer />
+              </div>
+            } />
+
+            <Route path="/mentions-legales" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <MentionsLegales />
+                </main>
+                <Footer />
+              </div>
+            } />
+
+            <Route path="/confidentialite" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <Confidentialite />
+                </main>
+                <Footer />
+              </div>
+            } />
+
+            <Route path="/conditions-generales" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <ConditionsGenerales />
+                </main>
+                <Footer />
+              </div>
+            } />
+
+            <Route path="/cookies" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <Cookies />
+                </main>
+                <Footer />
+              </div>
+            } />
+
+            {/* Auth route (no header/footer) 
+            <Route path="/ne_ka_connection_page" element={<AdminLogin />} />*/}
+
+            {/* Admin login (public) */}
+            <Route path="/admin/sama_page_de_connection" element={<AdminLogin />} />
+            <Route path="/admin/employe_login" element={<EmployeeLogin />} />
+            <Route path="/admin/employe" element={<DashboardEmployer />} />
+            
+
+
+            {/* Admin routes */}
+            <Route path="/admin" element={<AdminLayout />}>
+              <Route index element={<Dashboard />} />
+              <Route path="products" element={<Products />} />
+              <Route path="services" element={<ServicesPage />} />
+              <Route path="services/:id" element={<ServiceDetails />} />
+              <Route path="stock" element={<Stock />} />
+              <Route path="categories" element={<Categories />} />
+              <Route path="orders" element={<Orders />} />
+              <Route path="carts" element={<AbandonedCarts />} />
+              <Route path="clients" element={<Clients />} />
+              <Route path="clients/:id" element={<ClientDetail />} />
+              <Route path="users" element={<AdminOnly><AdminUsers /></AdminOnly>} />
+              <Route path="users/:id" element={<UserDetail />} />
+              <Route path="roles" element={<Roles />} />
+              <Route path="depenses" element={<DepensesPage />} />
+              <Route path="rapports" element={<Reports />} />
+              <Route path="testimonials" element={<Testimonials />} />
+              <Route path="contact" element={<ContactInfo />} />
+              <Route path="messages" element={<AdminOnly><Contacts /></AdminOnly>} />
+            </Route>
+
+            {/* 404 */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </CartProvider>
+      </BrowserRouter>
+    </TooltipProvider>
+  </QueryClientProvider>
+);
+
+export default App;
