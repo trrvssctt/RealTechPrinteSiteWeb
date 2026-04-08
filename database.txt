@@ -1,269 +1,39 @@
--- create_db.sql
--- Script complet de création : base, rôles, schéma app, tables, historiques, trigger générique.
--- Exécuter en tant que superutilisateur PostgreSQL (ex: user "postgres").
--- IMPORTANT : remplacer les mots de passe 'CHANGE_ME_*' après exécution par un secret manager.
+--
+-- PostgreSQL database dump
+--
 
--- 0) Variables à personnaliser (modifie si besoin)
--- DB_NAME: nom de la base de données à créer
--- OWNER_DBA: propriétaire principal (DBA)
--- Remplace si nécessaire avant exécution.
-\echo '--- Début du script de création de la DB ---'
+\restrict bQQHUTKsrTWxaiecFCv6hLsnmKg0rEYjkGd3YDbVTNkxv1qzv1fSkN0urZC0RHb
 
--- 1) Création des rôles (utilisateurs)
--- Remplacer les mots de passe par des secrets forts : utiliser un secret manager en production.
+-- Dumped from database version 16.13
+-- Dumped by pg_dump version 18.3
 
-DO $$
-BEGIN
-  -- Create roles only if not exists
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dba') THEN
-    PERFORM pg_catalog.pg_create_role('dba', true, false, false, false, false, false, false, ''); -- NOLOGIN role (owner)
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
-    EXECUTE format('CREATE ROLE app_user LOGIN PASSWORD %L;', 'CHANGE_ME_APP_USER');
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'db_migrator') THEN
-    EXECUTE format('CREATE ROLE db_migrator LOGIN PASSWORD %L;', 'CHANGE_ME_MIGRATOR');
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'backup_user') THEN
-    EXECUTE format('CREATE ROLE backup_user LOGIN PASSWORD %L;', 'CHANGE_ME_BACKUP');
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'auditor') THEN
-    CREATE ROLE auditor NOLOGIN;
-  END IF;
-END
-$$;
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
 
--- 2) Création de la base de données
--- Change DB name if needed
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'realtech_db') THEN
-    PERFORM dblink_connect('dbname=postgres');
-    -- create database owned by dba
-    EXECUTE 'CREATE DATABASE realtech_db OWNER dba';
-    PERFORM dblink_disconnect();
-  END IF;
-END
-$$;
+--
+-- Name: app; Type: SCHEMA; Schema: -; Owner: gestionapp
+--
 
--- Note : si dblink non installé, simple CREATE DATABASE sous superuser ci-dessous :
--- (La section ci-dessus tente d'éviter conflit, mais si erreur, exécute manuellement :)
--- CREATE DATABASE realtech_db OWNER dba;
+CREATE SCHEMA app;
 
-\connect realtech_db
 
--- 3) Extensions nécessaires
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";  -- gen_random_uuid()
-CREATE EXTENSION IF NOT EXISTS "plpgsql";
+ALTER SCHEMA app OWNER TO gestionapp;
 
--- 4) Créer le schema 'app' et en définir le propriétaire
-CREATE SCHEMA IF NOT EXISTS app AUTHORIZATION dba;
+--
+-- Name: log_table_history(); Type: FUNCTION; Schema: app; Owner: gestionapp
+--
 
--- 5) Créer les tables principales (schéma app)
-SET search_path = app, public;
-
--- roles
-CREATE TABLE IF NOT EXISTS app.roles (
-  id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  description TEXT
-);
-
--- users
-CREATE TABLE IF NOT EXISTS app.users (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  full_name TEXT,
-  phone TEXT,
-  is_active BOOLEAN DEFAULT TRUE,
-  email_verified_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
-
--- user_roles
-CREATE TABLE IF NOT EXISTS app.user_roles (
-  user_id UUID NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
-  role_id INT NOT NULL REFERENCES app.roles(id) ON DELETE CASCADE,
-  PRIMARY KEY (user_id, role_id)
-);
-
--- categories
-CREATE TABLE IF NOT EXISTS app.categories (
-  id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  slug TEXT NOT NULL UNIQUE,
-  description TEXT,
-  parent_id INT REFERENCES app.categories(id) ON DELETE SET NULL,
-  image_url TEXT
-);
-
--- products
-CREATE TABLE IF NOT EXISTS app.products (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  sku TEXT UNIQUE,
-  name TEXT NOT NULL,
-  slug TEXT NOT NULL UNIQUE,
-  description TEXT,
-  price NUMERIC(12,2) NOT NULL,
-  stock INT NOT NULL DEFAULT 0,
-  is_active BOOLEAN DEFAULT TRUE,
-  category_id INT REFERENCES app.categories(id),
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_products_slug ON app.products (slug);
-CREATE INDEX IF NOT EXISTS idx_products_price ON app.products (price);
-CREATE INDEX IF NOT EXISTS idx_products_active_stock ON app.products (is_active, stock);
-
--- product_images
-CREATE TABLE IF NOT EXISTS app.product_images (
-  id SERIAL PRIMARY KEY,
-  product_id UUID NOT NULL REFERENCES app.products(id) ON DELETE CASCADE,
-  url TEXT NOT NULL,
-  alt TEXT,
-  position INT DEFAULT 0
-);
-
--- orders
-CREATE TABLE IF NOT EXISTS app.orders (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES app.users(id),
-  status TEXT NOT NULL DEFAULT 'pending', -- pending, paid, shipped, cancelled
-  total_amount NUMERIC(12,2) NOT NULL,
-  placed_at TIMESTAMPTZ DEFAULT now(),
-  shipping_address JSONB,
-  billing_address JSONB,
-  metadata JSONB
-);
-
--- order_items
-CREATE TABLE IF NOT EXISTS app.order_items (
-  id SERIAL PRIMARY KEY,
-  order_id UUID NOT NULL REFERENCES app.orders(id) ON DELETE CASCADE,
-  product_id UUID REFERENCES app.products(id),
-  product_name TEXT,
-  unit_price NUMERIC(12,2) NOT NULL,
-  quantity INT NOT NULL,
-  total NUMERIC(12,2) NOT NULL
-);
-
--- payments
-CREATE TABLE IF NOT EXISTS app.payments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  order_id UUID REFERENCES app.orders(id) ON DELETE CASCADE,
-  provider TEXT,
-  provider_payment_id TEXT,
-  amount NUMERIC(12,2),
-  status TEXT,
-  paid_at TIMESTAMPTZ
-);
-
--- carts
-CREATE TABLE IF NOT EXISTS app.carts (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES app.users(id),
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
-
--- cart_items
-CREATE TABLE IF NOT EXISTS app.cart_items (
-  id SERIAL PRIMARY KEY,
-  cart_id UUID NOT NULL REFERENCES app.carts(id) ON DELETE CASCADE,
-  product_id UUID REFERENCES app.products(id),
-  quantity INT NOT NULL DEFAULT 1
-);
-
--- posts (blog)
-CREATE TABLE IF NOT EXISTS app.posts (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  author_id UUID REFERENCES app.users(id),
-  title TEXT NOT NULL,
-  slug TEXT NOT NULL UNIQUE,
-  content TEXT,
-  excerpt TEXT,
-  published BOOLEAN DEFAULT FALSE,
-  published_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
-
--- comments
-CREATE TABLE IF NOT EXISTS app.comments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  post_id UUID REFERENCES app.posts(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES app.users(id),
-  content TEXT NOT NULL,
-  is_visible BOOLEAN DEFAULT TRUE,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
--- audit_logs
-CREATE TABLE IF NOT EXISTS app.audit_logs (
-  id BIGSERIAL PRIMARY KEY,
-  user_id UUID REFERENCES app.users(id),
-  action TEXT NOT NULL,
-  target_table TEXT,
-  target_id TEXT,
-  payload JSONB,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
--- attachments
-CREATE TABLE IF NOT EXISTS app.attachments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  url TEXT NOT NULL,
-  filename TEXT,
-  content_type TEXT,
-  size BIGINT,
-  uploaded_by UUID REFERENCES app.users(id),
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
--- settings
-CREATE TABLE IF NOT EXISTS app.settings (
-  key TEXT PRIMARY KEY,
-  value JSONB,
-  description TEXT,
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
-
--- 6) Trigger utilitaire pour updated_at (ex: products, posts, users)
-CREATE OR REPLACE FUNCTION app.set_updated_at()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  NEW.updated_at = now();
-  RETURN NEW;
-END;
-$$;
-
--- Attacher trigger set_updated_at to tables that ont updated_at
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='app' AND table_name='products' AND column_name='updated_at') THEN
-    PERFORM (EXECUTE 'DROP TRIGGER IF EXISTS trg_products_set_updated_at ON app.products');
-    PERFORM (EXECUTE 'CREATE TRIGGER trg_products_set_updated_at BEFORE UPDATE ON app.products FOR EACH ROW EXECUTE FUNCTION app.set_updated_at()');
-  END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='app' AND table_name='posts' AND column_name='updated_at') THEN
-    PERFORM (EXECUTE 'DROP TRIGGER IF EXISTS trg_posts_set_updated_at ON app.posts');
-    PERFORM (EXECUTE 'CREATE TRIGGER trg_posts_set_updated_at BEFORE UPDATE ON app.posts FOR EACH ROW EXECUTE FUNCTION app.set_updated_at()');
-  END IF;
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='app' AND table_name='users' AND column_name='updated_at') THEN
-    PERFORM (EXECUTE 'DROP TRIGGER IF EXISTS trg_users_set_updated_at ON app.users');
-    PERFORM (EXECUTE 'CREATE TRIGGER trg_users_set_updated_at BEFORE UPDATE ON app.users FOR EACH ROW EXECUTE FUNCTION app.set_updated_at()');
-  END IF;
-END$$;
-
--- 7) Fonction trigger générique d'historisation (INSERT / UPDATE / DELETE)
-CREATE OR REPLACE FUNCTION app.log_table_history()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
+CREATE FUNCTION app.log_table_history() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $_$
 DECLARE
   hist_table text;
   pk text;
@@ -273,24 +43,22 @@ DECLARE
   current_user_id text;
 BEGIN
   hist_table := format('app.%s_history', TG_TABLE_NAME);
-
-  -- try to get current user from session variable
   current_user_id := current_setting('app.current_user_id', true);
 
   IF (TG_OP = 'DELETE') THEN
     old_row := to_jsonb(OLD);
     new_row := NULL;
-    pk := COALESCE(OLD.id::text, OLD.ID::text, OLD.uuid::text, OLD.uuid_user::text, NULL);
+    pk := COALESCE(old_row->>'id', old_row->>'ID', old_row->>'uuid', NULL);
     changed := jsonb_build_object('before', old_row);
   ELSIF (TG_OP = 'INSERT') THEN
     old_row := NULL;
     new_row := to_jsonb(NEW);
-    pk := COALESCE(NEW.id::text, NEW.ID::text, NEW.uuid::text, NULL);
+    pk := COALESCE(new_row->>'id', new_row->>'ID', new_row->>'uuid', NULL);
     changed := jsonb_build_object('after', new_row);
   ELSIF (TG_OP = 'UPDATE') THEN
     old_row := to_jsonb(OLD);
     new_row := to_jsonb(NEW);
-    pk := COALESCE(NEW.id::text, NEW.ID::text, NEW.uuid::text, NULL);
+    pk := COALESCE(new_row->>'id', new_row->>'ID', new_row->>'uuid', NULL);
     changed := (
       SELECT jsonb_object_agg(k, jsonb_build_object('old', old_row->k, 'new', new_row->k))
       FROM (
@@ -307,128 +75,2126 @@ BEGIN
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', hist_table)
     USING TG_OP, now(), current_user_id::uuid, TG_TABLE_NAME, pk, COALESCE(new_row, old_row), changed, NULL;
   EXCEPTION WHEN undefined_table THEN
-    -- history table missing: don't fail the main operation
-    RAISE NOTICE 'Historique absent pour %, insertion ignoree', hist_table;
+    -- ignore missing history table
+    RAISE NOTICE 'History table % does not exist - skipping', hist_table;
   END;
 
   RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
 END;
+$_$;
+
+
+ALTER FUNCTION app.log_table_history() OWNER TO gestionapp;
+
+--
+-- Name: set_updated_at(); Type: FUNCTION; Schema: app; Owner: gestionapp
+--
+
+CREATE FUNCTION app.set_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
 $$;
 
--- 8) Créer les tables d'historique pour chaque table listée
-DO $$
-DECLARE
-  tables text[] := ARRAY[
-    'roles','users','user_roles','categories','products','product_images',
-    'orders','order_items','payments','carts','cart_items',
-    'posts','comments','audit_logs','attachments','settings'
-  ];
-  t text;
-BEGIN
-  FOREACH t IN ARRAY tables LOOP
-    EXECUTE format($f$
-      CREATE TABLE IF NOT EXISTS app.%1$s_history (
-        history_id BIGSERIAL PRIMARY KEY,
-        operation TEXT NOT NULL,
-        changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        changed_by UUID,
-        table_name TEXT NOT NULL,
-        row_id TEXT,
-        row_data JSONB,
-        changed_fields JSONB,
-        query TEXT
-      );
-      CREATE INDEX IF NOT EXISTS %1$s_history_row_id_idx ON app.%1$s_history (row_id);
-      CREATE INDEX IF NOT EXISTS %1$s_history_changed_at_idx ON app.%1$s_history (changed_at);
-    $f$, t);
-  END LOOP;
-END $$;
 
--- 9) Attacher le trigger d'historique à chaque table
-DO $$
-DECLARE
-  tables text[] := ARRAY[
-    'roles','users','user_roles','categories','products','product_images',
-    'orders','order_items','payments','carts','cart_items',
-    'posts','comments','audit_logs','attachments','settings'
-  ];
-  t text;
-  trig_name text;
-BEGIN
-  FOREACH t IN ARRAY tables LOOP
-    trig_name := format('trg_%s_history', t);
-    -- drop if exists
-    EXECUTE format('DROP TRIGGER IF EXISTS %I ON app.%I;', trig_name, t);
-    -- create AFTER trigger (we want the final row state)
-    EXECUTE format('CREATE TRIGGER %I AFTER INSERT OR UPDATE OR DELETE ON app.%I FOR EACH ROW EXECUTE FUNCTION app.log_table_history();', trig_name, t);
-  END LOOP;
-END $$;
+ALTER FUNCTION app.set_updated_at() OWNER TO gestionapp;
 
--- 10) Grants & Privileges (Principle of least privilege)
--- Grant schema usage and table privileges to app_user
-GRANT USAGE ON SCHEMA app TO app_user, db_migrator;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA app TO app_user;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA app TO app_user;
+SET default_tablespace = '';
 
--- Grants for migrator (wider)
-GRANT CREATE ON SCHEMA app TO db_migrator;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA app TO db_migrator;
+SET default_table_access_method = heap;
 
--- Auditor: lecture sur toutes les tables (y compris historiques)
-GRANT SELECT ON ALL TABLES IN SCHEMA app TO auditor;
+--
+-- Name: attachments; Type: TABLE; Schema: app; Owner: gestionapp
+--
 
--- DBA: owner privileges (dba role already owner of schema)
-GRANT ALL PRIVILEGES ON SCHEMA app TO dba;
+CREATE TABLE app.attachments (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    url text NOT NULL,
+    filename text,
+    content_type text,
+    size bigint,
+    uploaded_by uuid,
+    created_at timestamp with time zone DEFAULT now()
+);
 
--- Default privileges for future objects created by dba
-ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT ON TABLES TO auditor;
-ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT ALL ON TABLES TO db_migrator;
 
--- 11) Revoke public access (hardening)
-REVOKE ALL ON SCHEMA app FROM PUBLIC;
-REVOKE ALL ON ALL TABLES IN SCHEMA app FROM PUBLIC;
+ALTER TABLE app.attachments OWNER TO gestionapp;
 
-\echo '--- Script terminé : DB, schéma, tables et historisation créés ---'
+--
+-- Name: attachments_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
 
--- Assure que metadata existe (jsonb)
-ALTER TABLE app.orders
-  ADD COLUMN IF NOT EXISTS metadata jsonb DEFAULT '{}'::jsonb;
+CREATE TABLE app.attachments_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
 
--- Ajouter created_by (UUID)
-ALTER TABLE app.orders
-  ADD COLUMN IF NOT EXISTS created_by uuid;
 
--- Optionnel : FK vers users (si la table existe)
-ALTER TABLE app.orders
-  ADD CONSTRAINT IF NOT EXISTS fk_orders_created_by_users
-    FOREIGN KEY (created_by) REFERENCES app.users(id) ON DELETE SET NULL;
+ALTER TABLE app.attachments_history OWNER TO gestionapp;
 
--- Ajouter colonne traiter_par (jsonb array)
-ALTER TABLE app.orders
-  ADD COLUMN IF NOT EXISTS traiter_par jsonb DEFAULT '[]'::jsonb;
-  
-  
-  -- Copier user_id existant vers created_by quand présent
-UPDATE app.orders
-SET created_by = user_id
-WHERE created_by IS NULL AND user_id IS NOT NULL;
+--
+-- Name: attachments_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
 
--- Si metadata.traiter_par existe et est un tableau, l'utiliser ; sinon initialiser avec une entrée 'created' basée sur user_id/placed_at
-UPDATE app.orders
-SET traiter_par = CASE
-  WHEN jsonb_typeof(metadata->'traiter_par') = 'array' THEN metadata->'traiter_par'
-  WHEN user_id IS NOT NULL THEN jsonb_build_array(
-    jsonb_build_object(
-      'user_id', user_id,
-      'name', COALESCE((metadata->'customer'->>'name'), NULL),
-      'roles', NULL,
-      'action', 'created',
-      'first_at', to_char(COALESCE(placed_at, created_at, now()), 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),
-      'last_at', to_char(COALESCE(placed_at, created_at, now()), 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),
-      'count', 1
-    )
-  )
-  ELSE traiter_par
-END
-WHERE (metadata->'traiter_par' IS NOT NULL) OR (user_id IS NOT NULL AND (traiter_par IS NULL OR traiter_par = '[]'::jsonb));
+CREATE SEQUENCE app.attachments_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.attachments_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: attachments_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.attachments_history_history_id_seq OWNED BY app.attachments_history.history_id;
+
+
+--
+-- Name: audit_logs; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.audit_logs (
+    id bigint NOT NULL,
+    user_id uuid,
+    action text NOT NULL,
+    target_table text,
+    target_id text,
+    payload jsonb,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE app.audit_logs OWNER TO gestionapp;
+
+--
+-- Name: audit_logs_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.audit_logs_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
+
+
+ALTER TABLE app.audit_logs_history OWNER TO gestionapp;
+
+--
+-- Name: audit_logs_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.audit_logs_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.audit_logs_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: audit_logs_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.audit_logs_history_history_id_seq OWNED BY app.audit_logs_history.history_id;
+
+
+--
+-- Name: audit_logs_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.audit_logs_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.audit_logs_id_seq OWNER TO gestionapp;
+
+--
+-- Name: audit_logs_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.audit_logs_id_seq OWNED BY app.audit_logs.id;
+
+
+--
+-- Name: cart_items; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.cart_items (
+    id integer NOT NULL,
+    cart_id uuid NOT NULL,
+    product_id uuid,
+    name text,
+    price numeric(12,2),
+    quantity integer DEFAULT 1 NOT NULL,
+    image text,
+    category text
+);
+
+
+ALTER TABLE app.cart_items OWNER TO gestionapp;
+
+--
+-- Name: cart_items_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.cart_items_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
+
+
+ALTER TABLE app.cart_items_history OWNER TO gestionapp;
+
+--
+-- Name: cart_items_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.cart_items_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.cart_items_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: cart_items_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.cart_items_history_history_id_seq OWNED BY app.cart_items_history.history_id;
+
+
+--
+-- Name: cart_items_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.cart_items_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.cart_items_id_seq OWNER TO gestionapp;
+
+--
+-- Name: cart_items_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.cart_items_id_seq OWNED BY app.cart_items.id;
+
+
+--
+-- Name: carts; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.carts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid,
+    session_id text,
+    status text DEFAULT 'active'::text,
+    items jsonb,
+    total_amount numeric(12,2) DEFAULT 0,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE app.carts OWNER TO gestionapp;
+
+--
+-- Name: carts_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.carts_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
+
+
+ALTER TABLE app.carts_history OWNER TO gestionapp;
+
+--
+-- Name: carts_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.carts_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.carts_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: carts_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.carts_history_history_id_seq OWNED BY app.carts_history.history_id;
+
+
+--
+-- Name: categories; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.categories (
+    id integer NOT NULL,
+    name text NOT NULL,
+    slug text NOT NULL,
+    description text,
+    parent_id integer,
+    image_url text
+);
+
+
+ALTER TABLE app.categories OWNER TO gestionapp;
+
+--
+-- Name: categories_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.categories_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
+
+
+ALTER TABLE app.categories_history OWNER TO gestionapp;
+
+--
+-- Name: categories_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.categories_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.categories_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: categories_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.categories_history_history_id_seq OWNED BY app.categories_history.history_id;
+
+
+--
+-- Name: categories_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.categories_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.categories_id_seq OWNER TO gestionapp;
+
+--
+-- Name: categories_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.categories_id_seq OWNED BY app.categories.id;
+
+
+--
+-- Name: clients; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.clients (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    full_name text,
+    email text,
+    phone text,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    created_by_channel text,
+    is_active boolean DEFAULT true,
+    metadata jsonb DEFAULT '{}'::jsonb,
+    created_by_user uuid,
+    updated_by_user uuid
+);
+
+
+ALTER TABLE app.clients OWNER TO gestionapp;
+
+--
+-- Name: comments; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.comments (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    post_id uuid,
+    user_id uuid,
+    content text NOT NULL,
+    is_visible boolean DEFAULT true,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE app.comments OWNER TO gestionapp;
+
+--
+-- Name: comments_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.comments_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
+
+
+ALTER TABLE app.comments_history OWNER TO gestionapp;
+
+--
+-- Name: comments_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.comments_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.comments_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: comments_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.comments_history_history_id_seq OWNED BY app.comments_history.history_id;
+
+
+--
+-- Name: contacts; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.contacts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    email text NOT NULL,
+    subject text,
+    message text NOT NULL,
+    ip_address text,
+    user_agent text,
+    is_handled boolean DEFAULT false,
+    metadata jsonb,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE app.contacts OWNER TO gestionapp;
+
+--
+-- Name: order_items; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.order_items (
+    id integer NOT NULL,
+    order_id uuid NOT NULL,
+    product_id uuid,
+    product_name text,
+    unit_price numeric(12,2) NOT NULL,
+    quantity integer NOT NULL,
+    total numeric(12,2) NOT NULL,
+    service_id uuid,
+    service_name text
+);
+
+
+ALTER TABLE app.order_items OWNER TO gestionapp;
+
+--
+-- Name: order_items_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.order_items_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
+
+
+ALTER TABLE app.order_items_history OWNER TO gestionapp;
+
+--
+-- Name: order_items_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.order_items_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.order_items_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: order_items_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.order_items_history_history_id_seq OWNED BY app.order_items_history.history_id;
+
+
+--
+-- Name: order_items_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.order_items_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.order_items_id_seq OWNER TO gestionapp;
+
+--
+-- Name: order_items_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.order_items_id_seq OWNED BY app.order_items.id;
+
+
+--
+-- Name: orders; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.orders (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid,
+    status text DEFAULT 'pending'::text NOT NULL,
+    total_amount numeric(12,2) NOT NULL,
+    placed_at timestamp with time zone DEFAULT now(),
+    shipping_address jsonb,
+    billing_address jsonb,
+    metadata jsonb,
+    client_id uuid,
+    completed_at timestamp without time zone,
+    cancel_reason text,
+    cancelled_at timestamp without time zone,
+    created_by uuid,
+    traiter_par jsonb DEFAULT '[]'::jsonb
+);
+
+
+ALTER TABLE app.orders OWNER TO gestionapp;
+
+--
+-- Name: orders_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.orders_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
+
+
+ALTER TABLE app.orders_history OWNER TO gestionapp;
+
+--
+-- Name: orders_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.orders_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.orders_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: orders_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.orders_history_history_id_seq OWNED BY app.orders_history.history_id;
+
+
+--
+-- Name: payments; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.payments (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    order_id uuid,
+    provider text,
+    provider_payment_id text,
+    amount numeric(12,2),
+    status text,
+    paid_at timestamp with time zone
+);
+
+
+ALTER TABLE app.payments OWNER TO gestionapp;
+
+--
+-- Name: payments_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.payments_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
+
+
+ALTER TABLE app.payments_history OWNER TO gestionapp;
+
+--
+-- Name: payments_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.payments_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.payments_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: payments_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.payments_history_history_id_seq OWNED BY app.payments_history.history_id;
+
+
+--
+-- Name: permissions; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.permissions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    description text,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE app.permissions OWNER TO gestionapp;
+
+--
+-- Name: posts; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.posts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    author_id uuid,
+    title text NOT NULL,
+    slug text NOT NULL,
+    content text,
+    excerpt text,
+    published boolean DEFAULT false,
+    published_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE app.posts OWNER TO gestionapp;
+
+--
+-- Name: posts_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.posts_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
+
+
+ALTER TABLE app.posts_history OWNER TO gestionapp;
+
+--
+-- Name: posts_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.posts_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.posts_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: posts_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.posts_history_history_id_seq OWNED BY app.posts_history.history_id;
+
+
+--
+-- Name: product_images; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.product_images (
+    id integer NOT NULL,
+    product_id uuid NOT NULL,
+    url text NOT NULL,
+    alt text,
+    "position" integer DEFAULT 0
+);
+
+
+ALTER TABLE app.product_images OWNER TO gestionapp;
+
+--
+-- Name: product_images_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.product_images_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
+
+
+ALTER TABLE app.product_images_history OWNER TO gestionapp;
+
+--
+-- Name: product_images_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.product_images_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.product_images_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: product_images_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.product_images_history_history_id_seq OWNED BY app.product_images_history.history_id;
+
+
+--
+-- Name: product_images_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.product_images_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.product_images_id_seq OWNER TO gestionapp;
+
+--
+-- Name: product_images_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.product_images_id_seq OWNED BY app.product_images.id;
+
+
+--
+-- Name: products; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.products (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    sku text,
+    name text NOT NULL,
+    slug text NOT NULL,
+    description text,
+    price numeric(12,2) NOT NULL,
+    stock integer DEFAULT 0 NOT NULL,
+    is_active boolean DEFAULT true,
+    category_id integer,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    price_ht numeric(12,2),
+    tva_rate numeric(5,2),
+    threshold integer DEFAULT 5,
+    in_stock boolean DEFAULT true,
+    featured boolean DEFAULT false,
+    short_description text,
+    tags jsonb,
+    image_url text
+);
+
+
+ALTER TABLE app.products OWNER TO gestionapp;
+
+--
+-- Name: products_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.products_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
+
+
+ALTER TABLE app.products_history OWNER TO gestionapp;
+
+--
+-- Name: products_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.products_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.products_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: products_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.products_history_history_id_seq OWNED BY app.products_history.history_id;
+
+
+--
+-- Name: rapports; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.rapports (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid,
+    type_rapport text NOT NULL,
+    format_rapport text NOT NULL,
+    parameters jsonb DEFAULT '{}'::jsonb,
+    filename text,
+    rows_count integer,
+    metadata jsonb DEFAULT '{}'::jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT rapports_format_rapport_check CHECK ((format_rapport = ANY (ARRAY['pdf'::text, 'png'::text, 'jpg'::text, 'xls'::text, 'csv'::text]))),
+    CONSTRAINT rapports_type_rapport_check CHECK ((type_rapport = ANY (ARRAY['journalier'::text, 'mensuelle'::text, 'annuelle'::text])))
+);
+
+
+ALTER TABLE app.rapports OWNER TO gestionapp;
+
+--
+-- Name: role_permissions; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.role_permissions (
+    role_id uuid NOT NULL,
+    permission_id uuid NOT NULL
+);
+
+
+ALTER TABLE app.role_permissions OWNER TO gestionapp;
+
+--
+-- Name: roles; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.roles (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    description text,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE app.roles OWNER TO gestionapp;
+
+--
+-- Name: roles_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.roles_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
+
+
+ALTER TABLE app.roles_history OWNER TO gestionapp;
+
+--
+-- Name: roles_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.roles_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.roles_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: roles_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.roles_history_history_id_seq OWNED BY app.roles_history.history_id;
+
+
+--
+-- Name: services; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.services (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    description text,
+    price numeric(12,2) DEFAULT 0,
+    duration_minutes integer DEFAULT 0,
+    is_active boolean DEFAULT true,
+    metadata jsonb DEFAULT '{}'::jsonb,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE app.services OWNER TO gestionapp;
+
+--
+-- Name: sessions; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.sessions (
+    id uuid NOT NULL,
+    user_id uuid,
+    refresh_token text,
+    expires_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE app.sessions OWNER TO gestionapp;
+
+--
+-- Name: settings; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.settings (
+    key text NOT NULL,
+    value jsonb,
+    description text,
+    updated_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE app.settings OWNER TO gestionapp;
+
+--
+-- Name: settings_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.settings_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
+
+
+ALTER TABLE app.settings_history OWNER TO gestionapp;
+
+--
+-- Name: settings_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.settings_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.settings_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: settings_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.settings_history_history_id_seq OWNED BY app.settings_history.history_id;
+
+
+--
+-- Name: stock_mouvement; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.stock_mouvement (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    product_id uuid NOT NULL,
+    order_id uuid,
+    order_item_id integer,
+    movement_type text NOT NULL,
+    movement_subtype text NOT NULL,
+    quantity integer NOT NULL,
+    unit_cost numeric(12,2),
+    reference text,
+    related_movement_id uuid,
+    status text DEFAULT 'active'::text NOT NULL,
+    cancel_reason text,
+    created_by uuid,
+    metadata jsonb DEFAULT '{}'::jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    cancelled_at timestamp with time zone,
+    CONSTRAINT stock_mouvement_movement_type_check CHECK ((movement_type = ANY (ARRAY['in'::text, 'out'::text]))),
+    CONSTRAINT stock_mouvement_quantity_check CHECK ((quantity > 0)),
+    CONSTRAINT stock_mouvement_status_check CHECK ((status = ANY (ARRAY['active'::text, 'voided'::text])))
+);
+
+
+ALTER TABLE app.stock_mouvement OWNER TO gestionapp;
+
+--
+-- Name: user_actions; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.user_actions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid,
+    action text NOT NULL,
+    metadata jsonb DEFAULT '{}'::jsonb,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE app.user_actions OWNER TO gestionapp;
+
+--
+-- Name: user_roles; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.user_roles (
+    user_id uuid NOT NULL,
+    role_id uuid NOT NULL
+);
+
+
+ALTER TABLE app.user_roles OWNER TO gestionapp;
+
+--
+-- Name: users; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.users (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    email text NOT NULL,
+    password_hash text NOT NULL,
+    full_name text,
+    phone text,
+    is_active boolean DEFAULT true,
+    email_verified_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    role_id uuid
+);
+
+
+ALTER TABLE app.users OWNER TO gestionapp;
+
+--
+-- Name: users_history; Type: TABLE; Schema: app; Owner: gestionapp
+--
+
+CREATE TABLE app.users_history (
+    history_id bigint NOT NULL,
+    operation text NOT NULL,
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    changed_by uuid,
+    table_name text NOT NULL,
+    row_id text,
+    row_data jsonb,
+    changed_fields jsonb,
+    query text
+);
+
+
+ALTER TABLE app.users_history OWNER TO gestionapp;
+
+--
+-- Name: users_history_history_id_seq; Type: SEQUENCE; Schema: app; Owner: gestionapp
+--
+
+CREATE SEQUENCE app.users_history_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE app.users_history_history_id_seq OWNER TO gestionapp;
+
+--
+-- Name: users_history_history_id_seq; Type: SEQUENCE OWNED BY; Schema: app; Owner: gestionapp
+--
+
+ALTER SEQUENCE app.users_history_history_id_seq OWNED BY app.users_history.history_id;
+
+
+--
+-- Name: attachments_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.attachments_history ALTER COLUMN history_id SET DEFAULT nextval('app.attachments_history_history_id_seq'::regclass);
+
+
+--
+-- Name: audit_logs id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.audit_logs ALTER COLUMN id SET DEFAULT nextval('app.audit_logs_id_seq'::regclass);
+
+
+--
+-- Name: audit_logs_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.audit_logs_history ALTER COLUMN history_id SET DEFAULT nextval('app.audit_logs_history_history_id_seq'::regclass);
+
+
+--
+-- Name: cart_items id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.cart_items ALTER COLUMN id SET DEFAULT nextval('app.cart_items_id_seq'::regclass);
+
+
+--
+-- Name: cart_items_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.cart_items_history ALTER COLUMN history_id SET DEFAULT nextval('app.cart_items_history_history_id_seq'::regclass);
+
+
+--
+-- Name: carts_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.carts_history ALTER COLUMN history_id SET DEFAULT nextval('app.carts_history_history_id_seq'::regclass);
+
+
+--
+-- Name: categories id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.categories ALTER COLUMN id SET DEFAULT nextval('app.categories_id_seq'::regclass);
+
+
+--
+-- Name: categories_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.categories_history ALTER COLUMN history_id SET DEFAULT nextval('app.categories_history_history_id_seq'::regclass);
+
+
+--
+-- Name: comments_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.comments_history ALTER COLUMN history_id SET DEFAULT nextval('app.comments_history_history_id_seq'::regclass);
+
+
+--
+-- Name: order_items id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.order_items ALTER COLUMN id SET DEFAULT nextval('app.order_items_id_seq'::regclass);
+
+
+--
+-- Name: order_items_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.order_items_history ALTER COLUMN history_id SET DEFAULT nextval('app.order_items_history_history_id_seq'::regclass);
+
+
+--
+-- Name: orders_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.orders_history ALTER COLUMN history_id SET DEFAULT nextval('app.orders_history_history_id_seq'::regclass);
+
+
+--
+-- Name: payments_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.payments_history ALTER COLUMN history_id SET DEFAULT nextval('app.payments_history_history_id_seq'::regclass);
+
+
+--
+-- Name: posts_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.posts_history ALTER COLUMN history_id SET DEFAULT nextval('app.posts_history_history_id_seq'::regclass);
+
+
+--
+-- Name: product_images id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.product_images ALTER COLUMN id SET DEFAULT nextval('app.product_images_id_seq'::regclass);
+
+
+--
+-- Name: product_images_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.product_images_history ALTER COLUMN history_id SET DEFAULT nextval('app.product_images_history_history_id_seq'::regclass);
+
+
+--
+-- Name: products_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.products_history ALTER COLUMN history_id SET DEFAULT nextval('app.products_history_history_id_seq'::regclass);
+
+
+--
+-- Name: roles_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.roles_history ALTER COLUMN history_id SET DEFAULT nextval('app.roles_history_history_id_seq'::regclass);
+
+
+--
+-- Name: settings_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.settings_history ALTER COLUMN history_id SET DEFAULT nextval('app.settings_history_history_id_seq'::regclass);
+
+
+--
+-- Name: users_history history_id; Type: DEFAULT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.users_history ALTER COLUMN history_id SET DEFAULT nextval('app.users_history_history_id_seq'::regclass);
+
+
+--
+-- Name: attachments_history attachments_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.attachments_history
+    ADD CONSTRAINT attachments_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: attachments attachments_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.attachments
+    ADD CONSTRAINT attachments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: audit_logs_history audit_logs_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.audit_logs_history
+    ADD CONSTRAINT audit_logs_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: audit_logs audit_logs_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.audit_logs
+    ADD CONSTRAINT audit_logs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: cart_items_history cart_items_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.cart_items_history
+    ADD CONSTRAINT cart_items_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: cart_items cart_items_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.cart_items
+    ADD CONSTRAINT cart_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: carts_history carts_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.carts_history
+    ADD CONSTRAINT carts_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: carts carts_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.carts
+    ADD CONSTRAINT carts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: categories_history categories_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.categories_history
+    ADD CONSTRAINT categories_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: categories categories_name_key; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.categories
+    ADD CONSTRAINT categories_name_key UNIQUE (name);
+
+
+--
+-- Name: categories categories_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.categories
+    ADD CONSTRAINT categories_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: categories categories_slug_key; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.categories
+    ADD CONSTRAINT categories_slug_key UNIQUE (slug);
+
+
+--
+-- Name: clients clients_email_key; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.clients
+    ADD CONSTRAINT clients_email_key UNIQUE (email);
+
+
+--
+-- Name: clients clients_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.clients
+    ADD CONSTRAINT clients_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: comments_history comments_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.comments_history
+    ADD CONSTRAINT comments_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: comments comments_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.comments
+    ADD CONSTRAINT comments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: contacts contacts_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.contacts
+    ADD CONSTRAINT contacts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: order_items_history order_items_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.order_items_history
+    ADD CONSTRAINT order_items_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: order_items order_items_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.order_items
+    ADD CONSTRAINT order_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: orders_history orders_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.orders_history
+    ADD CONSTRAINT orders_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: orders orders_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.orders
+    ADD CONSTRAINT orders_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: payments_history payments_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.payments_history
+    ADD CONSTRAINT payments_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: payments payments_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.payments
+    ADD CONSTRAINT payments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: permissions permissions_name_key; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.permissions
+    ADD CONSTRAINT permissions_name_key UNIQUE (name);
+
+
+--
+-- Name: permissions permissions_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.permissions
+    ADD CONSTRAINT permissions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: posts_history posts_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.posts_history
+    ADD CONSTRAINT posts_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: posts posts_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.posts
+    ADD CONSTRAINT posts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: posts posts_slug_key; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.posts
+    ADD CONSTRAINT posts_slug_key UNIQUE (slug);
+
+
+--
+-- Name: product_images_history product_images_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.product_images_history
+    ADD CONSTRAINT product_images_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: product_images product_images_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.product_images
+    ADD CONSTRAINT product_images_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: products_history products_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.products_history
+    ADD CONSTRAINT products_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: products products_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.products
+    ADD CONSTRAINT products_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: products products_sku_key; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.products
+    ADD CONSTRAINT products_sku_key UNIQUE (sku);
+
+
+--
+-- Name: products products_slug_key; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.products
+    ADD CONSTRAINT products_slug_key UNIQUE (slug);
+
+
+--
+-- Name: rapports rapports_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.rapports
+    ADD CONSTRAINT rapports_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: role_permissions role_permissions_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.role_permissions
+    ADD CONSTRAINT role_permissions_pkey PRIMARY KEY (role_id, permission_id);
+
+
+--
+-- Name: roles_history roles_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.roles_history
+    ADD CONSTRAINT roles_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: roles roles_name_key; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.roles
+    ADD CONSTRAINT roles_name_key UNIQUE (name);
+
+
+--
+-- Name: roles roles_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.roles
+    ADD CONSTRAINT roles_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: services services_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.services
+    ADD CONSTRAINT services_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: sessions sessions_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.sessions
+    ADD CONSTRAINT sessions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: settings_history settings_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.settings_history
+    ADD CONSTRAINT settings_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: settings settings_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.settings
+    ADD CONSTRAINT settings_pkey PRIMARY KEY (key);
+
+
+--
+-- Name: stock_mouvement stock_mouvement_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.stock_mouvement
+    ADD CONSTRAINT stock_mouvement_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_actions user_actions_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.user_actions
+    ADD CONSTRAINT user_actions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_roles user_roles_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.user_roles
+    ADD CONSTRAINT user_roles_pkey PRIMARY KEY (user_id, role_id);
+
+
+--
+-- Name: users users_email_key; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.users
+    ADD CONSTRAINT users_email_key UNIQUE (email);
+
+
+--
+-- Name: users_history users_history_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.users_history
+    ADD CONSTRAINT users_history_pkey PRIMARY KEY (history_id);
+
+
+--
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: idx_clients_created_at; Type: INDEX; Schema: app; Owner: gestionapp
+--
+
+CREATE INDEX idx_clients_created_at ON app.clients USING btree (created_at);
+
+
+--
+-- Name: idx_contacts_created_at; Type: INDEX; Schema: app; Owner: gestionapp
+--
+
+CREATE INDEX idx_contacts_created_at ON app.contacts USING btree (created_at);
+
+
+--
+-- Name: idx_contacts_email; Type: INDEX; Schema: app; Owner: gestionapp
+--
+
+CREATE INDEX idx_contacts_email ON app.contacts USING btree (email);
+
+
+--
+-- Name: idx_order_items_service_id; Type: INDEX; Schema: app; Owner: gestionapp
+--
+
+CREATE INDEX idx_order_items_service_id ON app.order_items USING btree (service_id);
+
+
+--
+-- Name: idx_products_active_stock; Type: INDEX; Schema: app; Owner: gestionapp
+--
+
+CREATE INDEX idx_products_active_stock ON app.products USING btree (is_active, stock);
+
+
+--
+-- Name: idx_products_price; Type: INDEX; Schema: app; Owner: gestionapp
+--
+
+CREATE INDEX idx_products_price ON app.products USING btree (price);
+
+
+--
+-- Name: idx_products_slug; Type: INDEX; Schema: app; Owner: gestionapp
+--
+
+CREATE INDEX idx_products_slug ON app.products USING btree (slug);
+
+
+--
+-- Name: idx_products_tags; Type: INDEX; Schema: app; Owner: gestionapp
+--
+
+CREATE INDEX idx_products_tags ON app.products USING gin (tags);
+
+
+--
+-- Name: idx_rapports_created_at; Type: INDEX; Schema: app; Owner: gestionapp
+--
+
+CREATE INDEX idx_rapports_created_at ON app.rapports USING btree (created_at DESC);
+
+
+--
+-- Name: idx_rapports_user_id; Type: INDEX; Schema: app; Owner: gestionapp
+--
+
+CREATE INDEX idx_rapports_user_id ON app.rapports USING btree (user_id);
+
+
+--
+-- Name: idx_services_name; Type: INDEX; Schema: app; Owner: gestionapp
+--
+
+CREATE INDEX idx_services_name ON app.services USING btree (lower(name));
+
+
+--
+-- Name: idx_stock_mouvement_created_at; Type: INDEX; Schema: app; Owner: gestionapp
+--
+
+CREATE INDEX idx_stock_mouvement_created_at ON app.stock_mouvement USING btree (created_at DESC);
+
+
+--
+-- Name: idx_stock_mouvement_order_id; Type: INDEX; Schema: app; Owner: gestionapp
+--
+
+CREATE INDEX idx_stock_mouvement_order_id ON app.stock_mouvement USING btree (order_id);
+
+
+--
+-- Name: idx_stock_mouvement_product_id; Type: INDEX; Schema: app; Owner: gestionapp
+--
+
+CREATE INDEX idx_stock_mouvement_product_id ON app.stock_mouvement USING btree (product_id);
+
+
+--
+-- Name: attachments trg_attachments_history; Type: TRIGGER; Schema: app; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_attachments_history AFTER INSERT OR DELETE OR UPDATE ON app.attachments FOR EACH ROW EXECUTE FUNCTION app.log_table_history();
+
+
+--
+-- Name: carts trg_carts_history; Type: TRIGGER; Schema: app; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_carts_history AFTER INSERT OR DELETE OR UPDATE ON app.carts FOR EACH ROW EXECUTE FUNCTION app.log_table_history();
+
+
+--
+-- Name: categories trg_categories_history; Type: TRIGGER; Schema: app; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_categories_history AFTER INSERT OR DELETE OR UPDATE ON app.categories FOR EACH ROW EXECUTE FUNCTION app.log_table_history();
+
+
+--
+-- Name: comments trg_comments_history; Type: TRIGGER; Schema: app; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_comments_history AFTER INSERT OR DELETE OR UPDATE ON app.comments FOR EACH ROW EXECUTE FUNCTION app.log_table_history();
+
+
+--
+-- Name: orders trg_orders_history; Type: TRIGGER; Schema: app; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_orders_history AFTER INSERT OR DELETE OR UPDATE ON app.orders FOR EACH ROW EXECUTE FUNCTION app.log_table_history();
+
+
+--
+-- Name: posts trg_posts_history; Type: TRIGGER; Schema: app; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_posts_history AFTER INSERT OR DELETE OR UPDATE ON app.posts FOR EACH ROW EXECUTE FUNCTION app.log_table_history();
+
+
+--
+-- Name: products trg_products_history; Type: TRIGGER; Schema: app; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_products_history AFTER INSERT OR DELETE OR UPDATE ON app.products FOR EACH ROW EXECUTE FUNCTION app.log_table_history();
+
+
+--
+-- Name: products trg_products_set_updated_at; Type: TRIGGER; Schema: app; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_products_set_updated_at BEFORE UPDATE ON app.products FOR EACH ROW EXECUTE FUNCTION app.set_updated_at();
+
+
+--
+-- Name: users trg_users_history; Type: TRIGGER; Schema: app; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_users_history AFTER INSERT OR DELETE OR UPDATE ON app.users FOR EACH ROW EXECUTE FUNCTION app.log_table_history();
+
+
+--
+-- Name: attachments attachments_uploaded_by_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.attachments
+    ADD CONSTRAINT attachments_uploaded_by_fkey FOREIGN KEY (uploaded_by) REFERENCES app.users(id);
+
+
+--
+-- Name: audit_logs audit_logs_user_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.audit_logs
+    ADD CONSTRAINT audit_logs_user_id_fkey FOREIGN KEY (user_id) REFERENCES app.users(id);
+
+
+--
+-- Name: cart_items cart_items_cart_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.cart_items
+    ADD CONSTRAINT cart_items_cart_id_fkey FOREIGN KEY (cart_id) REFERENCES app.carts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: cart_items cart_items_product_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.cart_items
+    ADD CONSTRAINT cart_items_product_id_fkey FOREIGN KEY (product_id) REFERENCES app.products(id);
+
+
+--
+-- Name: carts carts_user_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.carts
+    ADD CONSTRAINT carts_user_id_fkey FOREIGN KEY (user_id) REFERENCES app.users(id);
+
+
+--
+-- Name: categories categories_parent_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.categories
+    ADD CONSTRAINT categories_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES app.categories(id) ON DELETE SET NULL;
+
+
+--
+-- Name: comments comments_post_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.comments
+    ADD CONSTRAINT comments_post_id_fkey FOREIGN KEY (post_id) REFERENCES app.posts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: comments comments_user_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.comments
+    ADD CONSTRAINT comments_user_id_fkey FOREIGN KEY (user_id) REFERENCES app.users(id);
+
+
+--
+-- Name: order_items order_items_order_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.order_items
+    ADD CONSTRAINT order_items_order_id_fkey FOREIGN KEY (order_id) REFERENCES app.orders(id) ON DELETE CASCADE;
+
+
+--
+-- Name: order_items order_items_product_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.order_items
+    ADD CONSTRAINT order_items_product_id_fkey FOREIGN KEY (product_id) REFERENCES app.products(id);
+
+
+--
+-- Name: orders orders_client_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.orders
+    ADD CONSTRAINT orders_client_id_fkey FOREIGN KEY (client_id) REFERENCES app.clients(id);
+
+
+--
+-- Name: orders orders_user_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.orders
+    ADD CONSTRAINT orders_user_id_fkey FOREIGN KEY (user_id) REFERENCES app.users(id);
+
+
+--
+-- Name: payments payments_order_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.payments
+    ADD CONSTRAINT payments_order_id_fkey FOREIGN KEY (order_id) REFERENCES app.orders(id) ON DELETE CASCADE;
+
+
+--
+-- Name: posts posts_author_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.posts
+    ADD CONSTRAINT posts_author_id_fkey FOREIGN KEY (author_id) REFERENCES app.users(id);
+
+
+--
+-- Name: product_images product_images_product_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.product_images
+    ADD CONSTRAINT product_images_product_id_fkey FOREIGN KEY (product_id) REFERENCES app.products(id) ON DELETE CASCADE;
+
+
+--
+-- Name: products products_category_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.products
+    ADD CONSTRAINT products_category_id_fkey FOREIGN KEY (category_id) REFERENCES app.categories(id);
+
+
+--
+-- Name: rapports rapports_user_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.rapports
+    ADD CONSTRAINT rapports_user_id_fkey FOREIGN KEY (user_id) REFERENCES app.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: role_permissions role_permissions_permission_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.role_permissions
+    ADD CONSTRAINT role_permissions_permission_id_fkey FOREIGN KEY (permission_id) REFERENCES app.permissions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: role_permissions role_permissions_role_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.role_permissions
+    ADD CONSTRAINT role_permissions_role_id_fkey FOREIGN KEY (role_id) REFERENCES app.roles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: sessions sessions_user_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.sessions
+    ADD CONSTRAINT sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES app.users(id);
+
+
+--
+-- Name: stock_mouvement stock_mouvement_created_by_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.stock_mouvement
+    ADD CONSTRAINT stock_mouvement_created_by_fkey FOREIGN KEY (created_by) REFERENCES app.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: stock_mouvement stock_mouvement_order_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.stock_mouvement
+    ADD CONSTRAINT stock_mouvement_order_id_fkey FOREIGN KEY (order_id) REFERENCES app.orders(id) ON DELETE SET NULL;
+
+
+--
+-- Name: stock_mouvement stock_mouvement_order_item_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.stock_mouvement
+    ADD CONSTRAINT stock_mouvement_order_item_id_fkey FOREIGN KEY (order_item_id) REFERENCES app.order_items(id) ON DELETE SET NULL;
+
+
+--
+-- Name: stock_mouvement stock_mouvement_product_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.stock_mouvement
+    ADD CONSTRAINT stock_mouvement_product_id_fkey FOREIGN KEY (product_id) REFERENCES app.products(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: stock_mouvement stock_mouvement_related_movement_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.stock_mouvement
+    ADD CONSTRAINT stock_mouvement_related_movement_id_fkey FOREIGN KEY (related_movement_id) REFERENCES app.stock_mouvement(id) ON DELETE SET NULL;
+
+
+--
+-- Name: user_actions user_actions_user_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.user_actions
+    ADD CONSTRAINT user_actions_user_id_fkey FOREIGN KEY (user_id) REFERENCES app.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: user_roles user_roles_role_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.user_roles
+    ADD CONSTRAINT user_roles_role_id_fkey FOREIGN KEY (role_id) REFERENCES app.roles(id) ON DELETE CASCADE;
+
+
+--
+-- Name: user_roles user_roles_user_id_fkey; Type: FK CONSTRAINT; Schema: app; Owner: gestionapp
+--
+
+ALTER TABLE ONLY app.user_roles
+    ADD CONSTRAINT user_roles_user_id_fkey FOREIGN KEY (user_id) REFERENCES app.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: SCHEMA app; Type: ACL; Schema: -; Owner: gestionapp
+--
+
+GRANT USAGE ON SCHEMA app TO PUBLIC;
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict bQQHUTKsrTWxaiecFCv6hLsnmKg0rEYjkGd3YDbVTNkxv1qzv1fSkN0urZC0RHb
+
