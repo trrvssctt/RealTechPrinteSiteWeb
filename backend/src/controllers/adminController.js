@@ -1,4 +1,4 @@
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID: uuidv4 } = require('crypto');
 const bcrypt = require('bcrypt');
 const userModel = require('../models/userModel');
 const db = require('../config/db');

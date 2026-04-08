@@ -1,5 +1,7 @@
 const db = require('../config/db');
-const { v4: uuidv4, validate: validateUuid } = require('uuid');
+const { randomUUID: uuidv4 } = require('crypto');
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const validateUuid = (s) => UUID_RE.test(s);
 
 function safeProductId(id) {
   if (!id) return null;

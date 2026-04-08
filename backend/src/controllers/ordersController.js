@@ -1,6 +1,6 @@
 const db = require('../config/db');
 const clientModel = require('../models/clientModel');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID: uuidv4 } = require('crypto');
 const cache = require('../lib/cache');
 
 // Public: create an order
@@ -21,59 +21,94 @@ exports.createOrder = async (req, res, next) => {
       return res.status(400).json({ error: 'items required' });
     }
 
+    const {
+      sale_type,      // 'order' | 'direct_sale'
+      initial_status, // 'pending' | 'completed' (direct_sale only)
+      payment_method,
+      discount,
+      notes: orderNoteBody,
+      client_id: bodyClientId,
+    } = req.body;
+
+    const isDirectSale = sale_type === 'direct_sale';
     const orderId = uuidv4();
-    const orderNumber = `CMD-${Date.now().toString().slice(-6)}`;
+    const orderNumber = `${isDirectSale ? 'VD' : 'CMD'}-${Date.now().toString().slice(-6)}`;
 
     await db.query('BEGIN');
 
     // Try to find or create a client from provided customer info
     let client = null;
-    if (customer_email) {
+
+    // If client_id provided directly (admin modal), use it
+    if (bodyClientId) {
+      const cr = await db.query('SELECT * FROM app.clients WHERE id = $1 LIMIT 1', [bodyClientId]);
+      client = cr.rows[0] || null;
+    }
+    if (!client && customer_email) {
       client = await clientModel.getClientByEmail(customer_email);
     }
     if (!client && customer_phone) {
       client = await clientModel.getClientByPhone(customer_phone);
     }
-    if (!client) {
-      // create client with channel = site_web
+    if (!client && (customer_email || customer_name)) {
+      // create client with channel = site_web or manual
       try {
-        client = await clientModel.createClient({ full_name: customer_name || null, email: customer_email || null, phone: customer_phone || null, created_by_channel: 'site_web' });
+        const channel = isDirectSale ? 'manual' : 'site_web';
+        client = await clientModel.createClient({ full_name: customer_name || null, email: customer_email || null, phone: customer_phone || null, created_by_channel: channel });
       } catch (e) {
-        // ignore create errors (unique constraints) and continue without client
         console.error('client create error', e);
         client = null;
       }
     }
 
+    // Determine initial status
+    const status = (isDirectSale && initial_status === 'completed') ? 'completed' : 'pending';
+
         // include created_by column if present in schema (we pass userId as both user_id and created_by)
         const q = `INSERT INTO app.orders (id, user_id, created_by, client_id, status, total_amount, placed_at, shipping_address, billing_address, metadata)
           VALUES ($1,$2,$3,$4,$5,$6,now(),$7,$8,$9) RETURNING *`;
-    const status = 'pending';
     const clientId = client ? client.id : null;
     const userId = (req.user && req.user.id) || null;
     const createdBy = userId || null;
     const { rows } = await db.query(q, [orderId, userId, createdBy, clientId, status, total_amount || 0, shipping_address || null, billing_address || null, metadata || null]);
 
     // verify stock for each item and insert order_items
+    let catalogAmount = 0;
+    let costAmount = 0;
     for (const it of items) {
       const qty = Number(it.quantity || 0);
+      let productCatalogPrice = Number(it.catalog_price || it.unit_price || it.price || 0);
+      let productPurchasePrice = Number(it.purchase_price || 0);
+
       if (it.product_id) {
-        const pRes = await db.query('SELECT stock FROM app.products WHERE id = $1 LIMIT 1', [it.product_id]);
-        const stock = pRes.rows[0] ? Number(pRes.rows[0].stock || 0) : 0;
+        const pRes = await db.query('SELECT stock, price, purchase_price FROM app.products WHERE id = $1 LIMIT 1', [it.product_id]);
+        const pRow = pRes.rows[0];
+        const stock = pRow ? Number(pRow.stock || 0) : 0;
         if (qty > stock) {
           await db.query('ROLLBACK');
           return res.status(400).json({ error: `Insufficient stock for product ${it.product_name || it.product_id}` });
         }
+        // Use DB values as source of truth if not provided by client
+        if (!it.catalog_price) productCatalogPrice = Number(pRow?.price || productCatalogPrice);
+        if (!it.purchase_price) productPurchasePrice = Number(pRow?.purchase_price || 0);
+      } else if (it.service_id) {
+        const sRes = await db.query('SELECT price, purchase_price FROM app.services WHERE id = $1 LIMIT 1', [it.service_id]);
+        const sRow = sRes.rows[0];
+        if (!it.catalog_price) productCatalogPrice = Number(sRow?.price || productCatalogPrice);
+        if (!it.purchase_price) productPurchasePrice = Number(sRow?.purchase_price || 0);
       }
 
-      // Support both product items and service items in order_items
-      const unitPrice = Number(it.unit_price || it.price || 0);
+      // unit_price = prix réel de vente (négocié), catalog_price = prix affiché catalogue
+      const unitPrice = Number(it.unit_price || it.price || productCatalogPrice);
       const quantity = Number(it.quantity || 1);
       const total = unitPrice * quantity;
 
+      catalogAmount += productCatalogPrice * quantity;
+      costAmount    += productPurchasePrice * quantity;
+
       await db.query(
-        `INSERT INTO app.order_items (order_id, product_id, service_id, product_name, service_name, unit_price, quantity, total)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        `INSERT INTO app.order_items (order_id, product_id, service_id, product_name, service_name, unit_price, catalog_price, purchase_price, quantity, total)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
         [
           orderId,
           it.product_id || null,
@@ -81,17 +116,57 @@ exports.createOrder = async (req, res, next) => {
           it.product_name || it.name || null,
           it.service_name || it.name || null,
           unitPrice,
+          productCatalogPrice,
+          productPurchasePrice,
           quantity,
           total
         ]
       );
     }
 
-    // store basic customer info in metadata for now
+    // Stocker catalog_amount et cost_amount sur la commande
+    await db.query(
+      'UPDATE app.orders SET catalog_amount = $1, cost_amount = $2 WHERE id = $3',
+      [catalogAmount, costAmount, orderId]
+    );
+
+    // store customer info + sale context in metadata
     await db.query(
       `UPDATE app.orders SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), $1, $2::jsonb, true) WHERE id = $3`,
       ['{customer}', JSON.stringify({ name: customer_name || null, phone: customer_phone || null, email: customer_email || null }), orderId]
     );
+    // store sale_type, payment_method, discount, notes
+    const saleContext = {
+      sale_type:      sale_type      || 'order',
+      payment_method: payment_method || null,
+      discount:       discount       != null ? Number(discount) : 0,
+      notes:          orderNoteBody  || null,
+    };
+    await db.query(
+      `UPDATE app.orders SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), $1, $2::jsonb, true) WHERE id = $3`,
+      ['{sale_context}', JSON.stringify(saleContext), orderId]
+    );
+
+    // If direct sale completed: decrement stock immediately + create stock_mouvement
+    if (status === 'completed') {
+      for (const it of items) {
+        if (!it.product_id) continue;
+        const qty = Number(it.quantity || 0);
+        const upd = await db.query(
+          'UPDATE app.products SET stock = stock - $1 WHERE id = $2 AND stock >= $1 RETURNING stock',
+          [qty, it.product_id]
+        );
+        if (!upd.rows[0]) {
+          await db.query('ROLLBACK');
+          return res.status(400).json({ error: `Stock insuffisant pour : ${it.product_name || it.product_id}` });
+        }
+        await db.query(
+          `INSERT INTO app.stock_mouvement (product_id, order_id, movement_type, movement_subtype, quantity, reference, created_by, metadata)
+           VALUES ($1, $2, 'out', 'vente', $3, $4, $5, $6)`,
+          [it.product_id, orderId, qty, orderNumber, userId, JSON.stringify({ sale_type: 'direct_sale' })]
+        );
+      }
+    }
 
     // initialize traiter_par in metadata with creator info
     try {
@@ -151,7 +226,17 @@ exports.listOrders = async (req, res, next) => {
 // Admin: update order (status, etc.) - supports transactional stock adjustment on complete/cancel
 exports.updateOrder = async (req, res, next) => {
   const id = req.params.id;
-  const { status, cancel_reason } = req.body;
+  const {
+    status,
+    cancel_reason,
+    // Completion fields
+    delivery_status,  // 'full' | 'partial' | 'none'
+    payment_status,   // 'paid' | 'unpaid'
+    delivered_items,  // [{product_id, quantity}] — used when delivery_status='partial'
+    // Cancellation fields
+    returned_items,   // [{product_id, quantity}] — stock to restore on cancel
+  } = req.body;
+
   try {
     await db.query('BEGIN');
 
@@ -166,80 +251,213 @@ exports.updateOrder = async (req, res, next) => {
 
     // load items
     const { rows: items } = await db.query('SELECT * FROM app.order_items WHERE order_id = $1', [id]);
-    // map to store created movement ids for this transaction (keyed by order_item id)
     const createdMovementByItem = {};
 
-    // If marking completed: decrement stock atomically
+    // ── Completing / Updating progress ───────────────────────────────────────
+    // Accepts status='completed' from frontend; actual DB status may become
+    // 'in_progress' if not fully paid AND fully delivered.
     const updatedProductIds = [];
     if (status === 'completed' && order.status !== 'completed') {
-      for (const it of items) {
-        if (!it.product_id) continue;
-        const qty = Number(it.quantity || 0);
+
+      const effDelivery = delivery_status || 'full';
+      const effPayment  = payment_status  || 'paid';
+
+      // An order is truly COMPLETED only when paid + fully delivered
+      const targetStatus = (effDelivery === 'full' && effPayment === 'paid')
+        ? 'completed'
+        : 'in_progress';
+
+      // Recover quantities already delivered (for in_progress re-submission)
+      const prevDeliveredMap = {}; // product_id → already_delivered_qty
+      if (order.status === 'in_progress') {
+        const prev = order.metadata?.delivery?.delivered_items || [];
+        for (const d of prev) {
+          if (d.product_id) prevDeliveredMap[d.product_id] = Number(d.delivered_qty || 0);
+        }
+      }
+
+      // Build requested total delivered quantities
+      const requestedDeliveredMap = {}; // product_id → total_to_deliver_now
+      if (effDelivery === 'full') {
+        for (const it of items) {
+          if (it.product_id) requestedDeliveredMap[it.product_id] = Number(it.quantity || 0);
+        }
+      } else if (effDelivery === 'partial' && Array.isArray(delivered_items)) {
+        for (const di of delivered_items) {
+          const qty = Number(di.quantity || 0);
+          if (di.product_id && qty > 0) requestedDeliveredMap[di.product_id] = qty;
+        }
+      }
+      // effDelivery === 'none' → requestedDeliveredMap stays empty
+
+      // Compute incremental quantities to decrement (new - already done)
+      const itemsToDecrement = [];
+      for (const [pid, totalQty] of Object.entries(requestedDeliveredMap)) {
+        const alreadyQty = prevDeliveredMap[pid] || 0;
+        const newQty = totalQty - alreadyQty;
+        if (newQty <= 0) continue;
+        const orderItem = items.find(it => it.product_id === pid);
+        if (orderItem) itemsToDecrement.push({ ...orderItem, decrement_qty: newQty });
+      }
+
+      // Decrement stock for each incremental delivery
+      for (const it of itemsToDecrement) {
         const upd = await db.query(
           'UPDATE app.products SET stock = stock - $1 WHERE id = $2 AND stock >= $1 RETURNING stock',
-          [qty, it.product_id]
+          [it.decrement_qty, it.product_id]
         );
         if (upd.rows.length === 0) {
           await db.query('ROLLBACK');
-          return res.status(400).json({ error: `Insufficient stock for product ${it.product_name || it.product_id}` });
+          return res.status(400).json({ error: `Stock insuffisant pour : ${it.product_name || it.product_id}` });
         }
         updatedProductIds.push(it.product_id);
-        // insert stock movement record (out)
         try {
           const mv = await db.query(
             `INSERT INTO app.stock_mouvement (product_id, order_id, order_item_id, movement_type, movement_subtype, quantity, reference, created_by)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-            [it.product_id, id, it.id, 'out', 'commande', qty, (order.order_number || null), (req.user && req.user.id) || null]
+             VALUES ($1,$2,$3,'out','commande',$4,$5,$6) RETURNING id`,
+            [it.product_id, id, it.id, it.decrement_qty, order.order_number || null, (req.user && req.user.id) || null]
           );
-          if (mv.rows[0] && mv.rows[0].id) createdMovementByItem[it.id] = mv.rows[0].id;
+          if (mv.rows[0]?.id) createdMovementByItem[it.id] = mv.rows[0].id;
         } catch (e) {
-          // do not fail the whole transaction for logging error, but log it
           console.error('Failed to insert stock_mouvement (out) for item', it.id, e);
         }
       }
-      await db.query("UPDATE app.orders SET status = 'completed', completed_at = now() WHERE id = $1", [id]);
+
+      // Build total delivered map (merge prev + new)
+      const totalDeliveredMap = { ...prevDeliveredMap };
+      for (const [pid, qty] of Object.entries(requestedDeliveredMap)) {
+        totalDeliveredMap[pid] = qty; // total requested (not incremental)
+      }
+
+      const deliveryMeta = {
+        delivery_status: effDelivery,
+        payment_status:  effPayment,
+        delivered_items: Object.entries(totalDeliveredMap).map(([pid, qty]) => {
+          const oi = items.find(it => it.product_id === pid);
+          return {
+            product_id:    pid,
+            product_name:  oi?.product_name || null,
+            ordered_qty:   Number(oi?.quantity || 0),
+            delivered_qty: qty,
+          };
+        }),
+      };
+
+      if (targetStatus === 'completed') {
+        await db.query(
+          `UPDATE app.orders
+              SET status = 'completed', completed_at = now(),
+                  metadata = jsonb_set(COALESCE(metadata,'{}'), '{delivery}', $1::jsonb, true)
+            WHERE id = $2`,
+          [JSON.stringify(deliveryMeta), id]
+        );
+      } else {
+        await db.query(
+          `UPDATE app.orders
+              SET status = 'in_progress',
+                  metadata = jsonb_set(COALESCE(metadata,'{}'), '{delivery}', $1::jsonb, true)
+            WHERE id = $2`,
+          [JSON.stringify(deliveryMeta), id]
+        );
+      }
     }
 
-    // If cancelling: if previously completed, restore stock; record cancel reason
+    // ── Cancelling ────────────────────────────────────────────────────────────
     const restoredProductIds = [];
     if (status === 'cancelled' && order.status !== 'cancelled') {
-      if (order.status === 'completed') {
-        for (const it of items) {
-          if (!it.product_id) continue;
-          await db.query('UPDATE app.products SET stock = stock + $1 WHERE id = $2', [Number(it.quantity || 0), it.product_id]);
-          restoredProductIds.push(it.product_id);
-          // try to find the outgoing movement for this order_item and mark it voided, then insert a restoring movement
-          try {
-            // try to find movement created in this transaction first
-            let origId = createdMovementByItem[it.id] || null;
-            if (!origId) {
-              const find = await db.query(
-                `SELECT id FROM app.stock_mouvement WHERE order_id = $1 AND order_item_id = $2 AND movement_type = 'out' AND status = 'active' ORDER BY created_at DESC LIMIT 1`,
-                [id, it.id]
-              );
-              if (find.rows[0]) origId = find.rows[0].id;
-            }
+      // Determine which quantities to restore.
+      // If the caller provided returned_items, use those exact quantities.
+      // Otherwise fall back to old behavior (restore all if was completed).
+      let itemsToRestore = []; // [{product_id, restore_qty, order_item_id}]
 
-            if (origId) {
-              await db.query(`UPDATE app.stock_mouvement SET status = 'voided', cancelled_at = now(), cancel_reason = $1 WHERE id = $2`, [cancel_reason || null, origId]);
-            }
+      const prevDelivery = order.metadata?.delivery;
 
-            const mvIn = await db.query(
-              `INSERT INTO app.stock_mouvement (product_id, order_id, order_item_id, movement_type, movement_subtype, quantity, reference, related_movement_id, created_by)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-              [it.product_id, id, it.id, 'in', 'annulation_commande', Number(it.quantity || 0), (order.order_number || null), origId, (req.user && req.user.id) || null]
-            );
-            // you may want to store mvIn.rows[0].id somewhere or log it
-          } catch (e) {
-            console.error('Failed to record stock_mouvement for cancellation (in) for item', it.id, e);
+      if (Array.isArray(returned_items)) {
+        // Caller specified exact returned quantities
+        for (const ri of returned_items) {
+          const qty = Number(ri.quantity || 0);
+          if (!ri.product_id || qty <= 0) continue;
+          const orderItem = items.find(it => it.product_id === ri.product_id);
+          itemsToRestore.push({
+            product_id: ri.product_id,
+            restore_qty: qty,
+            order_item_id: orderItem?.id || null,
+          });
+        }
+      } else if (order.status === 'completed' || order.status === 'in_progress') {
+        // Legacy: no returned_items provided — restore whatever was delivered
+        const deliveredList = prevDelivery?.delivered_items;
+        if (Array.isArray(deliveredList) && deliveredList.length > 0) {
+          for (const dl of deliveredList) {
+            if (!dl.product_id || !dl.delivered_qty) continue;
+            const orderItem = items.find(it => it.product_id === dl.product_id);
+            itemsToRestore.push({
+              product_id: dl.product_id,
+              restore_qty: Number(dl.delivered_qty),
+              order_item_id: orderItem?.id || null,
+            });
+          }
+        } else {
+          // Old orders without delivery metadata → restore all
+          for (const it of items) {
+            if (!it.product_id) continue;
+            itemsToRestore.push({
+              product_id: it.product_id,
+              restore_qty: Number(it.quantity || 0),
+              order_item_id: it.id,
+            });
           }
         }
       }
-      await db.query('UPDATE app.orders SET status = $1, cancelled_at = now(), cancel_reason = $2 WHERE id = $3', [status, cancel_reason || null, id]);
+
+      // Restore stock
+      for (const ri of itemsToRestore) {
+        await db.query(
+          'UPDATE app.products SET stock = stock + $1 WHERE id = $2',
+          [ri.restore_qty, ri.product_id]
+        );
+        restoredProductIds.push(ri.product_id);
+
+        try {
+          let origId = null;
+          if (ri.order_item_id) {
+            const find = await db.query(
+              `SELECT id FROM app.stock_mouvement WHERE order_id=$1 AND order_item_id=$2 AND movement_type='out' AND status='active' ORDER BY created_at DESC LIMIT 1`,
+              [id, ri.order_item_id]
+            );
+            if (find.rows[0]) origId = find.rows[0].id;
+          }
+          if (origId) {
+            await db.query(
+              `UPDATE app.stock_mouvement SET status='voided', cancelled_at=now(), cancel_reason=$1 WHERE id=$2`,
+              [cancel_reason || null, origId]
+            );
+          }
+          await db.query(
+            `INSERT INTO app.stock_mouvement (product_id, order_id, order_item_id, movement_type, movement_subtype, quantity, reference, related_movement_id, created_by)
+             VALUES ($1,$2,$3,'in','retour_annulation',$4,$5,$6,$7)`,
+            [ri.product_id, id, ri.order_item_id, ri.restore_qty, (order.order_number || null), origId, (req.user && req.user.id) || null]
+          );
+        } catch (e) {
+          console.error('Failed to record stock_mouvement for cancellation (in)', ri.product_id, e);
+        }
+      }
+
+      // Store returned info in metadata
+      const returnMeta = { returned_items: itemsToRestore.map(ri => ({ product_id: ri.product_id, returned_qty: ri.restore_qty })) };
+      await db.query(
+        `UPDATE app.orders
+            SET status = $1,
+                cancelled_at = now(),
+                cancel_reason = $2,
+                metadata = jsonb_set(COALESCE(metadata,'{}'), '{cancellation}', $3::jsonb, true)
+          WHERE id = $4`,
+        [status, cancel_reason || null, JSON.stringify(returnMeta), id]
+      );
     }
 
-    // Generic status update for other transitions
-    if (status && status !== 'completed' && status !== 'cancelled') {
+    // Generic status update for other transitions (pending, etc.)
+    if (status && status !== 'completed' && status !== 'cancelled' && status !== 'in_progress') {
       await db.query('UPDATE app.orders SET status = $1 WHERE id = $2', [status, id]);
     }
 

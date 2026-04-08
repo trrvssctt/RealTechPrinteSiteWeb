@@ -67,6 +67,7 @@ const destroy = async (req, res, next) => {
     const id = req.params.id;
     const product = await productModel.deleteProduct(id);
     if (!product) return res.status(404).json({ error: 'Not found' });
+    cache.clear();
     res.json({ data: product });
   } catch (err) {
     next(err);
