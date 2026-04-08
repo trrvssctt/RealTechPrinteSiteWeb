@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
 dotenv.config({ path: __dirname + '/../../.env' });
 
@@ -20,6 +22,10 @@ const clientsRouter = require('./routes/clients');
 const adminStockMovementsRouter = require('./routes/adminStockMovements');
 const adminRapportsRouter = require('./routes/adminRapports');
 const adminServicesRouter = require('./routes/adminServices');
+const adminDepensesRouter = require('./routes/adminDepenses');
+
+const cron = require('node-cron');
+const { generateAndSendDailyReport } = require('./services/dailyReportService');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -28,8 +34,38 @@ const PORT = process.env.PORT || 4000;
 const compression = require('compression');
 
 app.use(compression());
+
+// ── Sécurité : headers HTTP ──────────────────────────────────────────────────
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: false, // géré côté frontend
+}));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+// ── Rate limiting global (toutes les routes API) ─────────────────────────────
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de requêtes, réessayez dans 15 minutes.' },
+  skip: (req) => process.env.NODE_ENV !== 'production' && (req.ip === '127.0.0.1' || req.ip === '::1'),
+});
+app.use('/api/', globalLimiter);
+
+// ── Rate limiting strict pour login / register ───────────────────────────────
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de tentatives de connexion. Réessayez dans 15 minutes.' },
+  keyGenerator: (req) => req.ip + ':' + (req.body?.email || ''),
+});
+app.use('/api/users/login', authLimiter);
+app.use('/api/users/register', authLimiter);
 
 // CORS configuration
 // Support a single FRONTEND_ORIGIN or a comma-separated FRONTEND_ORIGINS env var.
@@ -100,6 +136,32 @@ app.use('/api/clients', clientsRouter);
 app.use('/api/admin/stock-mouvements', adminStockMovementsRouter);
 app.use('/api/admin/rapports', adminRapportsRouter);
 app.use('/api/admin/services', adminServicesRouter);
+app.use('/api/admin/depenses', adminDepensesRouter);
+
+// ─── Rapport journalier automatique à 22h00 ────────────────────────────────
+// Route manuelle pour forcer le rapport (admin uniquement)
+const adminAuth = require('./middleware/adminAuth');
+app.post('/api/admin/rapport-journalier/envoyer', adminAuth, async (req, res) => {
+  try {
+    const date = req.body.date || null; // optionnel: YYYY-MM-DD
+    const result = await generateAndSendDailyReport(date);
+    res.json(result);
+  } catch (err) {
+    console.error('[DailyReport] Erreur manuelle:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Cron : chaque jour à 22h00 (heure serveur)
+cron.schedule('0 22 * * *', async () => {
+  try {
+    await generateAndSendDailyReport();
+  } catch (err) {
+    console.error('[DailyReport] Erreur cron 22h00:', err);
+  }
+}, { timezone: 'Africa/Dakar' });
+
+console.log('[DailyReport] Cron planifié à 22h00 (Africa/Dakar)');
 
 app.use((err, req, res, next) => {
   console.error(err);
