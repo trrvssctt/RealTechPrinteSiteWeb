@@ -4,11 +4,11 @@ import { apiFetch } from '@/lib/api';
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { 
-  LayoutDashboard, 
-  Package, 
-  FolderTree, 
-  ShoppingCart, 
-  MessageSquare, 
+  LayoutDashboard,
+  Package,
+  FolderTree,
+  ShoppingCart,
+  MessageSquare,
   Phone,
   Users,
   LogOut,
@@ -16,7 +16,8 @@ import {
   Home,
   Bell,
   Settings,
-  ChartAreaIcon
+  ChartAreaIcon,
+  TrendingDown
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -64,12 +65,12 @@ const AdminLayout = ({ children }: { children?: any }) => {
 
   const handleLogout = async () => {
     try {
+      // Invalider la session côté serveur
+      await apiFetch('/api/users/logout', { method: 'POST' }).catch(() => {});
+    } finally {
       localStorage.removeItem('sessionToken');
       toast.success("Déconnexion réussie");
       window.location.href = '/admin/sama_page_de_connection';
-    } catch (err) {
-      console.error('Logout error', err);
-      toast.error('Erreur lors de la déconnexion');
     }
   };
 
@@ -103,6 +104,7 @@ const AdminLayout = ({ children }: { children?: any }) => {
     { path: "/admin/carts", icon: ShoppingCart, label: "Paniers", badge: null },
     { path: "/admin/messages", icon: MessageSquare, label: "Messages", badge: "unread" },
     //{ path: "/admin/testimonials", icon: MessageSquare, label: "Témoignages", badge: null },
+    { path: "/admin/depenses", icon: TrendingDown, label: "Dépenses", badge: null },
     { path: "/admin/rapports", icon: ChartAreaIcon, label: "Rapports", badge: null },
     //{ path: "/admin/contact", icon: Phone, label: "Contacts", badge: null },
   ];
