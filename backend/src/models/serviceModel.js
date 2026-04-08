@@ -1,5 +1,5 @@
 const pool = require('../config/db');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID: uuidv4 } = require('crypto');
 
 async function listServices({ limit = 100, offset = 0, q, includeInactive = false } = {}) {
   const params = [];
@@ -31,8 +31,8 @@ async function getServiceById(id) {
 
 async function createService(data, userId) {
   const id = uuidv4();
-  const sql = `INSERT INTO app.services (id, name, description, price, duration_minutes, is_active, metadata, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`;
-  const params = [id, data.name, data.description || null, data.price || 0, data.duration_minutes || 0, data.is_active !== false, data.metadata || {}, userId || null];
+  const sql = `INSERT INTO app.services (id, name, description, price, purchase_price, duration_minutes, is_active, metadata, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
+  const params = [id, data.name, data.description || null, data.price || 0, data.purchase_price || 0, data.duration_minutes || 0, data.is_active !== false, data.metadata || {}, userId || null];
   const res = await pool.query(sql, params);
   return res.rows[0];
 }
@@ -44,6 +44,7 @@ async function updateService(id, data) {
   if (data.name !== undefined) { fields.push(`name = $${idx++}`); params.push(data.name); }
   if (data.description !== undefined) { fields.push(`description = $${idx++}`); params.push(data.description); }
   if (data.price !== undefined) { fields.push(`price = $${idx++}`); params.push(data.price); }
+  if (data.purchase_price !== undefined) { fields.push(`purchase_price = $${idx++}`); params.push(data.purchase_price); }
   if (data.duration_minutes !== undefined) { fields.push(`duration_minutes = $${idx++}`); params.push(data.duration_minutes); }
   if (data.is_active !== undefined) { fields.push(`is_active = $${idx++}`); params.push(data.is_active); }
   if (data.metadata !== undefined) { fields.push(`metadata = $${idx++}`); params.push(data.metadata); }

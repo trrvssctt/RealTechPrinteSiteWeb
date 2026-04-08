@@ -1,20 +1,34 @@
 const pool = require('../config/db');
 
-async function createUser({ id = null, name, full_name, email, phone, password_hash, role_id, is_active = true }) {
-  // support both `name` and `full_name` inputs, map to `full_name` DB column
-  const fn = full_name || name || null;
-  if (id) {
-    const res = await pool.query(
-      `INSERT INTO app.users (id, full_name, email, phone, password_hash, role_id, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [id, fn, email, phone || null, password_hash || null, role_id || null, is_active]
-    );
+// Définit app.current_user_id dans la session PostgreSQL pour l'historisation.
+// Le trigger log_table_history() gère les valeurs vides/nulles en toute sécurité.
+async function setAuditContext(client, userId) {
+  const val = (userId && typeof userId === 'string') ? userId : '';
+  await client.query(`SELECT set_config('app.current_user_id', $1, true)`, [val]);
+}
+
+async function createUser({ id = null, name, full_name, email, phone, password_hash, role_id, is_active = true, createdBy = null }) {
+  const client = await pool.connect();
+  try {
+    // support both `name` and `full_name` inputs, map to `full_name` DB column
+    const fn = full_name || name || null;
+    await setAuditContext(client, createdBy);
+    let res;
+    if (id) {
+      res = await client.query(
+        `INSERT INTO app.users (id, full_name, email, phone, password_hash, role_id, is_active, status) VALUES ($1,$2,$3,$4,$5,$6,$7,'actif') RETURNING *`,
+        [id, fn, email, phone || null, password_hash || null, role_id || null, is_active]
+      );
+    } else {
+      res = await client.query(
+        `INSERT INTO app.users (full_name, email, phone, password_hash, role_id, is_active, status) VALUES ($1,$2,$3,$4,$5,$6,'actif') RETURNING *`,
+        [fn, email, phone || null, password_hash || null, role_id || null, is_active]
+      );
+    }
     return mapUserRow(res.rows[0]);
+  } finally {
+    client.release();
   }
-  const res = await pool.query(
-    `INSERT INTO app.users (full_name, email, phone, password_hash, role_id, is_active) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-    [fn, email, phone || null, password_hash || null, role_id || null, is_active]
-  );
-  return mapUserRow(res.rows[0]);
 }
 
 function mapUserRow(row) {
@@ -39,12 +53,14 @@ async function getUserByEmail(email) {
   return mapUserRow(res.rows[0]);
 }
 
-async function listUsers({ limit = 100, offset = 0 } = {}) {
+async function listUsers({ limit = 100, offset = 0, includeDeleted = false } = {}) {
+  const whereClause = includeDeleted ? '' : `WHERE COALESCE(u.status, 'actif') != 'supprimé'`;
   const res = await pool.query(
     `SELECT u.*, u.full_name, array_remove(array_agg(r.name), NULL) AS roles
      FROM app.users u
      LEFT JOIN app.user_roles ur ON ur.user_id = u.id
      LEFT JOIN app.roles r ON r.id = ur.role_id
+     ${whereClause}
      GROUP BY u.id
      ORDER BY u.created_at DESC
      LIMIT $1 OFFSET $2`,
@@ -53,13 +69,34 @@ async function listUsers({ limit = 100, offset = 0 } = {}) {
   return res.rows.map(mapUserRow);
 }
 
-async function updateUser(id, { name, full_name, email, phone, role_id, is_active, password_hash }) {
-  const fn = full_name || name || null;
-  const res = await pool.query(
-    `UPDATE app.users SET full_name = COALESCE($1, full_name), email = COALESCE($2, email), phone = COALESCE($3, phone), role_id = COALESCE($4, role_id), is_active = COALESCE($5, is_active), password_hash = COALESCE($6, password_hash), updated_at = now() WHERE id = $7 RETURNING *`,
-    [fn, email, phone, role_id, is_active, password_hash, id]
-  );
-  return mapUserRow(res.rows[0]);
+async function updateUser(id, { name, full_name, email, phone, role_id, is_active, status, password_hash, updatedBy = null }) {
+  const client = await pool.connect();
+  try {
+    const fn = full_name || name || null;
+    await setAuditContext(client, updatedBy);
+    // Si is_active change, synchroniser le status (sauf supprimé)
+    let resolvedStatus = status;
+    if (resolvedStatus === undefined && is_active !== undefined) {
+      resolvedStatus = is_active ? 'actif' : 'inactif';
+    }
+    const res = await client.query(
+      `UPDATE app.users
+       SET full_name       = COALESCE($1, full_name),
+           email           = COALESCE($2, email),
+           phone           = COALESCE($3, phone),
+           role_id         = COALESCE($4, role_id),
+           is_active       = COALESCE($5, is_active),
+           status          = COALESCE($6, COALESCE(status, 'actif')),
+           password_hash   = COALESCE($7, password_hash),
+           updated_at      = now()
+       WHERE id = $8
+       RETURNING *`,
+      [fn, email, phone, role_id, is_active, resolvedStatus, password_hash, id]
+    );
+    return mapUserRow(res.rows[0]);
+  } finally {
+    client.release();
+  }
 }
 
 async function setUserRole(userId, roleId) {
@@ -70,14 +107,47 @@ async function setUserRole(userId, roleId) {
   }
 }
 
-async function deleteUser(id) {
-  // Instead of hard-deleting the user (which can break foreign key constraints
-  // like audit logs), mark the user as inactive. Return the updated user.
-  const res = await pool.query(
-    `UPDATE app.users SET is_active = false, updated_at = now() WHERE id = $1 RETURNING *`,
-    [id]
-  );
-  return mapUserRow(res.rows[0]);
+async function deleteUser(id, deletedBy = null) {
+  const client = await pool.connect();
+  try {
+    await setAuditContext(client, deletedBy);
+    // Soft-delete: status = 'supprimé', is_active = false, horodatage
+    const res = await client.query(
+      `UPDATE app.users
+       SET status     = 'supprimé',
+           is_active  = false,
+           deleted_at = now(),
+           deleted_by = $2,
+           updated_at = now()
+       WHERE id = $1
+       RETURNING *`,
+      [id, deletedBy || null]
+    );
+    return mapUserRow(res.rows[0]);
+  } finally {
+    client.release();
+  }
+}
+
+async function restoreUser(id, restoredBy = null) {
+  const client = await pool.connect();
+  try {
+    await setAuditContext(client, restoredBy);
+    const res = await client.query(
+      `UPDATE app.users
+       SET status     = 'actif',
+           is_active  = true,
+           deleted_at = NULL,
+           deleted_by = NULL,
+           updated_at = now()
+       WHERE id = $1
+       RETURNING *`,
+      [id, ]
+    );
+    return mapUserRow(res.rows[0]);
+  } finally {
+    client.release();
+  }
 }
 
 async function logUserAction(user_id, action, metadata = {}) {
@@ -102,6 +172,7 @@ module.exports = {
   listUsers,
   updateUser,
   deleteUser,
+  restoreUser,
   logUserAction,
   ensureRole,
   assignRole,

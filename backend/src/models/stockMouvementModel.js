@@ -8,6 +8,7 @@ const listMovements = async (opts = {}) => {
     product_id = null,
     movement_type = null,
     start = null,
+    end = null,
   } = opts;
 
   const params = [];
@@ -26,6 +27,11 @@ const listMovements = async (opts = {}) => {
   if (start) {
     where += ` AND sm.created_at >= $${idx}`;
     params.push(start);
+    idx++;
+  }
+  if (end) {
+    where += ` AND sm.created_at <= $${idx}`;
+    params.push(end);
     idx++;
   }
 
