@@ -265,17 +265,19 @@ export const ProductModal = ({ open, onOpenChange, product, categories, onSave }
                   </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="stock">Stock actuel</Label>
-                    <Input
-                      id="stock"
-                      type="number"
-                      value={formData.stock}
-                      onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                      min="0"
-                    />
-                  </div>
+                <div className={product ? "" : "grid grid-cols-2 gap-4"}>
+                  {!product && (
+                    <div className="space-y-2">
+                      <Label htmlFor="stock">Stock initial</Label>
+                      <Input
+                        id="stock"
+                        type="number"
+                        value={formData.stock}
+                        onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+                        min="0"
+                      />
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <Label htmlFor="threshold">Seuil d'alerte</Label>
@@ -289,7 +291,7 @@ export const ProductModal = ({ open, onOpenChange, product, categories, onSave }
                   </div>
                 </div>
 
-                {parseInt(formData.stock) <= parseInt(formData.threshold) && (
+                {!product && parseInt(formData.stock) <= parseInt(formData.threshold) && (
                   <div className="bg-destructive/10 border border-destructive/20 rounded-md p-3">
                     <p className="text-sm text-destructive font-medium">
                       ⚠️ Stock faible : Le stock est en dessous du seuil d'alerte

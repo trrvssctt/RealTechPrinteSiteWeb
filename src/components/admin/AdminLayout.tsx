@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { 
+import {
   LayoutDashboard,
   Package,
   FolderTree,
@@ -17,7 +17,9 @@ import {
   Bell,
   Settings,
   ChartAreaIcon,
-  TrendingDown
+  TrendingDown,
+  Bot,
+  Smartphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +31,28 @@ const AdminLayout = ({ children }: { children?: any }) => {
   const [isEmployee, setIsEmployee] = useState(false);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
+  const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
+
+  const fetchStats = async () => {
+    try {
+      const [ordersResp, messagesResp] = await Promise.all([
+        apiFetch('/api/admin/orders'),
+        apiFetch('/api/contacts?handled=false'),
+      ]);
+      if (ordersResp.ok) {
+        const ordersData = await ordersResp.json().catch(() => ({}));
+        const pending = (ordersData.data || []).filter((o: any) => o.status === 'pending').length;
+        setPendingOrdersCount(pending);
+      }
+      if (messagesResp.ok) {
+        const messagesData = await messagesResp.json().catch(() => ({}));
+        setUnreadMessagesCount((messagesData.results || []).length);
+      }
+    } catch (err) {
+      console.error('fetchStats error', err);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -59,7 +83,9 @@ const AdminLayout = ({ children }: { children?: any }) => {
       }
     };
     fetchMe();
-    return () => { mounted = false; };
+    fetchStats();
+    const interval = setInterval(fetchStats, 30000);
+    return () => { mounted = false; clearInterval(interval); };
   }, []);
   const location = useLocation();
 
@@ -106,13 +132,15 @@ const AdminLayout = ({ children }: { children?: any }) => {
     //{ path: "/admin/testimonials", icon: MessageSquare, label: "Témoignages", badge: null },
     { path: "/admin/depenses", icon: TrendingDown, label: "Dépenses", badge: null },
     { path: "/admin/rapports", icon: ChartAreaIcon, label: "Rapports", badge: null },
+    { path: "/admin/agent-ia", icon: Bot, label: "Agent IA", badge: null, adminOnly: true },
+    { path: "/admin/whatsapp-notifs", icon: Smartphone, label: "WhatsApp", badge: null, adminOnly: true },
     //{ path: "/admin/contact", icon: Phone, label: "Contacts", badge: null },
   ];
 
-  const filteredNavItems = navItems.filter(item => {
+  const filteredNavItems = navItems.filter((item: any) => {
     if (isEmployee) {
-      // hide Users and Messages pages for employees
       if (item.path === '/admin/users' || item.path === '/admin/messages') return false;
+      if (item.adminOnly) return false;
     }
     return true;
   });
@@ -144,9 +172,11 @@ const AdminLayout = ({ children }: { children?: any }) => {
             <Link to="/admin/messages">
               <Button variant="ghost" size="icon" className="relative">
                 <Bell className="h-5 w-5" />
-                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-[10px] font-medium text-white">
-                  3
-                </span>
+                {unreadMessagesCount > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-[10px] font-medium text-white">
+                    {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+                  </span>
+                )}
               </Button>
             </Link>
             
@@ -192,11 +222,15 @@ const AdminLayout = ({ children }: { children?: any }) => {
                   >
                     <Icon className={cn("h-5 w-5", isActive ? "text-blue-600" : "text-gray-400")} />
                     <span className="font-medium flex-1">{item.label}</span>
-                    {item.badge === "unread" && (
-                      <Badge variant="destructive" className="h-5 px-1.5 text-xs">3</Badge>
+                    {item.badge === "unread" && unreadMessagesCount > 0 && (
+                      <Badge variant="destructive" className="h-5 px-1.5 text-xs">
+                        {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+                      </Badge>
                     )}
-                    {item.badge === "pending" && (
-                      <Badge variant="secondary" className="h-5 px-1.5 text-xs">5</Badge>
+                    {item.badge === "pending" && pendingOrdersCount > 0 && (
+                      <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                        {pendingOrdersCount > 99 ? '99+' : pendingOrdersCount}
+                      </Badge>
                     )}
                   </div>
                 </Link>
@@ -242,9 +276,11 @@ const AdminLayout = ({ children }: { children?: any }) => {
             )}>
               <Bell className="h-5 w-5 mb-1" />
               <span className="text-xs">Messages</span>
-              <span className="absolute top-1 right-4 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[8px] font-medium text-white">
-                3
-              </span>
+              {unreadMessagesCount > 0 && (
+                <span className="absolute top-1 right-4 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[8px] font-medium text-white">
+                  {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+                </span>
+              )}
             </div>
           </Link>
         </div>
