@@ -1,4 +1,5 @@
 const serviceModel = require('../models/serviceModel');
+const n8n = require('../services/n8nWebhookService');
 
 async function list(req, res) {
   try {
@@ -34,6 +35,7 @@ async function create(req, res) {
     if (!data.name) return res.status(400).json({ ok: false, error: 'Name is required' });
     const row = await serviceModel.createService(data, userId);
     res.status(201).json({ ok: true, data: row });
+    setImmediate(() => n8n.notifyServiceCreated(row, req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false, error: 'Failed to create service' });
@@ -46,6 +48,7 @@ async function update(req, res) {
     const data = req.body || {};
     const row = await serviceModel.updateService(id, data);
     res.json({ ok: true, data: row });
+    setImmediate(() => n8n.notifyServiceUpdated(row, req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false, error: 'Failed to update service' });
@@ -55,10 +58,10 @@ async function update(req, res) {
 async function remove(req, res) {
   try {
     const id = req.params.id;
-    // soft-delete: mark as inactive instead of physical delete
     const row = await serviceModel.updateService(id, { is_active: false });
     if (!row) return res.status(404).json({ ok: false, error: 'Service not found' });
     res.json({ ok: true, data: row });
+    setImmediate(() => n8n.notifyServiceDeleted(row, req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false, error: 'Failed to delete service' });

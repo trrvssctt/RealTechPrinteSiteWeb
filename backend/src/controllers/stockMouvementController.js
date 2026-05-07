@@ -1,4 +1,5 @@
 const stockModel = require('../models/stockMouvementModel');
+const n8n = require('../services/n8nWebhookService');
 
 const list = async (req, res, next) => {
   try {
@@ -20,6 +21,21 @@ const create = async (req, res, next) => {
     const userId = req.user && req.user.id ? req.user.id : null;
     const payload = req.body || {};
     const result = await stockModel.createMovement(payload, userId);
+
+    // Notifications WhatsApp pour les mouvements de stock (fire-and-forget)
+    if (result.movement) {
+      const enriched = {
+        ...result.movement,
+        product_name: result.product?.name || payload.product_name || null,
+        employe: req.user?.full_name || req.user?.email || null,
+      };
+      if (result.movement.movement_type === 'out') {
+        setImmediate(() => n8n.notifyStockExit(enriched).catch(e => console.warn('[n8n] Notification sortie stock échouée :', e.message)));
+      } else if (result.movement.movement_type === 'in') {
+        setImmediate(() => n8n.notifyStockEntry(enriched).catch(e => console.warn('[n8n] Notification entrée stock échouée :', e.message)));
+      }
+    }
+
     res.status(201).json({ data: result.movement, product: result.product });
   } catch (err) {
     if (err.message === 'insufficient_stock') return res.status(400).json({ error: 'insufficient_stock' });

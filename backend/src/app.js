@@ -23,6 +23,7 @@ const adminStockMovementsRouter = require('./routes/adminStockMovements');
 const adminRapportsRouter = require('./routes/adminRapports');
 const adminServicesRouter = require('./routes/adminServices');
 const adminDepensesRouter = require('./routes/adminDepenses');
+const adminAgentRouter    = require('./routes/adminAgent');
 
 const cron = require('node-cron');
 const { generateAndSendDailyReport } = require('./services/dailyReportService');
@@ -137,6 +138,7 @@ app.use('/api/admin/stock-mouvements', adminStockMovementsRouter);
 app.use('/api/admin/rapports', adminRapportsRouter);
 app.use('/api/admin/services', adminServicesRouter);
 app.use('/api/admin/depenses', adminDepensesRouter);
+app.use('/api/admin/agent',   adminAgentRouter);
 
 // ─── Rapport journalier automatique à 22h00 ────────────────────────────────
 // Route manuelle pour forcer le rapport (admin uniquement)

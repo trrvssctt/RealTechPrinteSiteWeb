@@ -1,5 +1,6 @@
 const clientModel = require('../models/clientModel');
 const db = require('../config/db');
+const n8n = require('../services/n8nWebhookService');
 
 const listClients = async (req, res, next) => {
   try {
@@ -73,8 +74,8 @@ const createClient = async (req, res, next) => {
     }
     const created_by_user = req.user?.id || null;
     const client = await clientModel.createClient({ full_name, email, phone, created_by_channel, metadata, created_by_user });
-    // log action if needed
     res.status(201).json({ client });
+    setImmediate(() => n8n.notifyClientCreated(client, req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (err) {
     next(err);
   }
@@ -88,6 +89,7 @@ const updateClient = async (req, res, next) => {
     payload.updated_by_user = req.user?.id || null;
     const client = await clientModel.updateClient(id, payload);
     res.json({ client });
+    setImmediate(() => n8n.notifyClientUpdated(client, req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (err) {
     next(err);
   }
@@ -103,6 +105,7 @@ const deleteClient = async (req, res, next) => {
 
     const client = await clientModel.softDeleteClient(id);
     res.json({ client });
+    setImmediate(() => n8n.notifyClientDeleted(client, req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (err) {
     next(err);
   }

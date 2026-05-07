@@ -1,29 +1,14 @@
 /**
  * Service de rapport journalier
  * Génère un fichier Excel avec 3 feuilles (Ventes, Sorties Stock, Dépenses)
- * et l'envoie par email à 22h00.
+ * et l'envoie via WhatsApp à 22h00 (via n8n).
  */
 
 const ExcelJS = require('exceljs');
-const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs');
 const pool = require('../config/db');
-
-// ─── Mailer ────────────────────────────────────────────────────────────────────
-
-function createTransporter() {
-  if (!process.env.SMTP_HOST || !process.env.SMTP_PORT) return null;
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT, 10) || 587,
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: process.env.SMTP_USER ? {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    } : undefined,
-  });
-}
+const n8n = require('./n8nWebhookService');
 
 // ─── Requêtes base de données ───────────────────────────────────────────────
 
@@ -326,65 +311,20 @@ async function generateAndSendDailyReport(targetDate) {
     console.warn('[DailyReport] Impossible de sauvegarder dans app.rapports :', dbErr.message);
   }
 
-  // Envoi email
-  const transporter = createTransporter();
-  const to = process.env.DAILY_REPORT_EMAIL || 'diankaseydou52@gmail.com';
-
-  if (!transporter) {
-    console.warn('[DailyReport] SMTP non configuré – fichier généré sans envoi email.');
-    return { ok: true, filepath, emailSent: false };
-  }
-
-  const html = `
-    <div style="font-family:Calibri,sans-serif;max-width:600px;margin:auto">
-      <div style="background:#1E3A5F;padding:20px;border-radius:8px 8px 0 0">
-        <h2 style="color:#fff;margin:0">📊 Rapport Journalier — RealTech Print</h2>
-        <p style="color:#a0c4e8;margin:4px 0 0">${dateLabel}</p>
-      </div>
-      <div style="background:#f8f9fa;padding:20px;border-radius:0 0 8px 8px;border:1px solid #dee2e6">
-        <p>Bonjour,</p>
-        <p>Veuillez trouver ci-joint le rapport journalier automatique de la boutique.</p>
-        <table style="width:100%;border-collapse:collapse;margin:16px 0">
-          <tr style="background:#1E3A5F;color:#fff">
-            <th style="padding:10px;text-align:left">Rubrique</th>
-            <th style="padding:10px;text-align:right">Total</th>
-          </tr>
-          <tr style="background:#fff">
-            <td style="padding:10px;border-bottom:1px solid #dee2e6">💰 Ventes (${ventes.length} commandes)</td>
-            <td style="padding:10px;text-align:right;font-weight:bold">${totalVentes.toLocaleString('fr-FR')} FCFA</td>
-          </tr>
-          <tr style="background:#f0f4f8">
-            <td style="padding:10px;border-bottom:1px solid #dee2e6">📦 Sorties de Stock</td>
-            <td style="padding:10px;text-align:right;font-weight:bold">${totalQteSorties} unités</td>
-          </tr>
-          <tr style="background:#fff">
-            <td style="padding:10px">💸 Dépenses (${depenses.length} enregistrements)</td>
-            <td style="padding:10px;text-align:right;font-weight:bold">${totalDepenses.toLocaleString('fr-FR')} FCFA</td>
-          </tr>
-        </table>
-        <p style="color:#888;font-size:12px">Ce rapport est généré automatiquement chaque soir à 22h00.<br>
-        Le fichier Excel détaillé est joint à ce message.</p>
-      </div>
-    </div>
-  `;
-
-  await transporter.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
-    to,
-    subject: `📊 Rapport journalier RealTech Print — ${date}`,
-    html,
-    text: `Rapport journalier du ${dateLabel}\n\nVentes: ${totalVentes} FCFA (${ventes.length} commandes)\nSorties stock: ${totalQteSorties} unités\nDépenses: ${totalDepenses} FCFA`,
-    attachments: [
-      {
-        filename,
-        path: filepath,
-        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      },
-    ],
+  // Envoi via n8n → WhatsApp
+  await n8n.notifyDailyReport({
+    date,
+    filepath,
+    filename,
+    totalVentes,
+    totalQteSorties,
+    totalDepenses,
+    ventesCount:   ventes.length,
+    depensesCount: depenses.length,
   });
 
-  console.log(`[DailyReport] Email envoyé à ${to}`);
-  return { ok: true, filepath, emailSent: true, to };
+  console.log(`[DailyReport] Rapport envoyé à n8n pour diffusion WhatsApp`);
+  return { ok: true, filepath, whatsappSent: true };
 }
 
 module.exports = { generateAndSendDailyReport };

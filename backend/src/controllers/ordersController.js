@@ -2,6 +2,7 @@ const db = require('../config/db');
 const clientModel = require('../models/clientModel');
 const { randomUUID: uuidv4 } = require('crypto');
 const cache = require('../lib/cache');
+const n8n = require('../services/n8nWebhookService');
 
 // Public: create an order
 exports.createOrder = async (req, res, next) => {
@@ -73,42 +74,28 @@ exports.createOrder = async (req, res, next) => {
     const { rows } = await db.query(q, [orderId, userId, createdBy, clientId, status, total_amount || 0, shipping_address || null, billing_address || null, metadata || null]);
 
     // verify stock for each item and insert order_items
-    let catalogAmount = 0;
-    let costAmount = 0;
     for (const it of items) {
       const qty = Number(it.quantity || 0);
-      let productCatalogPrice = Number(it.catalog_price || it.unit_price || it.price || 0);
-      let productPurchasePrice = Number(it.purchase_price || 0);
 
       if (it.product_id) {
-        const pRes = await db.query('SELECT stock, price, purchase_price FROM app.products WHERE id = $1 LIMIT 1', [it.product_id]);
+        const pRes = await db.query('SELECT stock, price FROM app.products WHERE id = $1 LIMIT 1', [it.product_id]);
         const pRow = pRes.rows[0];
         const stock = pRow ? Number(pRow.stock || 0) : 0;
         if (qty > stock) {
           await db.query('ROLLBACK');
           return res.status(400).json({ error: `Insufficient stock for product ${it.product_name || it.product_id}` });
         }
-        // Use DB values as source of truth if not provided by client
-        if (!it.catalog_price) productCatalogPrice = Number(pRow?.price || productCatalogPrice);
-        if (!it.purchase_price) productPurchasePrice = Number(pRow?.purchase_price || 0);
       } else if (it.service_id) {
-        const sRes = await db.query('SELECT price, purchase_price FROM app.services WHERE id = $1 LIMIT 1', [it.service_id]);
-        const sRow = sRes.rows[0];
-        if (!it.catalog_price) productCatalogPrice = Number(sRow?.price || productCatalogPrice);
-        if (!it.purchase_price) productPurchasePrice = Number(sRow?.purchase_price || 0);
+        await db.query('SELECT price FROM app.services WHERE id = $1 LIMIT 1', [it.service_id]);
       }
 
-      // unit_price = prix réel de vente (négocié), catalog_price = prix affiché catalogue
-      const unitPrice = Number(it.unit_price || it.price || productCatalogPrice);
+      const unitPrice = Number(it.unit_price || it.price || 0);
       const quantity = Number(it.quantity || 1);
       const total = unitPrice * quantity;
 
-      catalogAmount += productCatalogPrice * quantity;
-      costAmount    += productPurchasePrice * quantity;
-
       await db.query(
-        `INSERT INTO app.order_items (order_id, product_id, service_id, product_name, service_name, unit_price, catalog_price, purchase_price, quantity, total)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        `INSERT INTO app.order_items (order_id, product_id, service_id, product_name, service_name, unit_price, quantity, total)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
         [
           orderId,
           it.product_id || null,
@@ -116,19 +103,11 @@ exports.createOrder = async (req, res, next) => {
           it.product_name || it.name || null,
           it.service_name || it.name || null,
           unitPrice,
-          productCatalogPrice,
-          productPurchasePrice,
           quantity,
           total
         ]
       );
     }
-
-    // Stocker catalog_amount et cost_amount sur la commande
-    await db.query(
-      'UPDATE app.orders SET catalog_amount = $1, cost_amount = $2 WHERE id = $3',
-      [catalogAmount, costAmount, orderId]
-    );
 
     // store customer info + sale context in metadata
     await db.query(
@@ -188,6 +167,24 @@ exports.createOrder = async (req, res, next) => {
     }
 
     await db.query('COMMIT');
+
+    // Notification WhatsApp via n8n (fire-and-forget)
+    setImmediate(async () => {
+      try {
+        const orderPayload = {
+          ...rows[0],
+          items,
+          client_name: client?.full_name || customer_name || null,
+        };
+        if (status === 'completed') {
+          await n8n.notifySaleCompleted(orderPayload);
+        } else {
+          await n8n.notifyOrderCreated(orderPayload);
+        }
+      } catch (e) {
+        console.warn('[n8n] Notification création commande échouée :', e.message);
+      }
+    });
 
     res.status(201).json({ data: rows[0] });
   } catch (err) {
@@ -494,6 +491,20 @@ exports.updateOrder = async (req, res, next) => {
     const { rows: finalRows } = await db.query(q, [id]);
 
     await db.query('COMMIT');
+
+    // Notification WhatsApp via n8n (fire-and-forget)
+    setImmediate(async () => {
+      try {
+        const updatedOrder = finalRows[0];
+        if (status === 'completed') {
+          await n8n.notifySaleCompleted(updatedOrder);
+        } else if (status === 'cancelled') {
+          await n8n.notifyOrderCancelled({ ...updatedOrder, cancel_reason });
+        }
+      } catch (e) {
+        console.warn('[n8n] Notification update commande échouée :', e.message);
+      }
+    });
 
     // Invalidate product caches for affected products so stock changes are reflected
     try {

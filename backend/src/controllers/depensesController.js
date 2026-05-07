@@ -8,6 +8,7 @@
  */
 
 const pool = require('../config/db');
+const n8n = require('../services/n8nWebhookService');
 
 const CATEGORIES = [
   'Fournitures de bureau',
@@ -126,6 +127,7 @@ const create = async (req, res, next) => {
     );
 
     res.status(201).json({ data: full[0] });
+    setImmediate(() => n8n.notifyDepenseCreated(full[0], req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (err) {
     next(err);
   }
@@ -149,6 +151,7 @@ const valider = async (req, res, next) => {
       return res.status(404).json({ error: 'Dépense introuvable ou déjà traitée' });
     }
     res.json({ data: rows[0] });
+    setImmediate(() => n8n.notifyDepenseValidated(rows[0], req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (err) {
     next(err);
   }
@@ -177,6 +180,7 @@ const rejeter = async (req, res, next) => {
       return res.status(404).json({ error: 'Dépense introuvable ou déjà traitée' });
     }
     res.json({ data: rows[0] });
+    setImmediate(() => n8n.notifyDepenseRejected(rows[0], req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (err) {
     next(err);
   }
@@ -200,6 +204,7 @@ const annuler = async (req, res, next) => {
 
     if (!rows[0]) return res.status(404).json({ error: 'Dépense introuvable' });
     res.json({ data: rows[0] });
+    setImmediate(() => n8n.notifyDepenseCancelled(rows[0], req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (err) {
     next(err);
   }

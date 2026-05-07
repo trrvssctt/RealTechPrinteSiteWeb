@@ -1,5 +1,6 @@
 const productModel = require('../models/productModel');
 const cache = require('../lib/cache');
+const n8n = require('../services/n8nWebhookService');
 
 const list = async (req, res, next) => {
   try {
@@ -18,7 +19,7 @@ const list = async (req, res, next) => {
 
     const rows = await productModel.listProducts(opts);
     // store small result in cache for 30 seconds
-    cache.set('products:list', opts, rows, 30);
+    cache.set('products:list', opts, rows, 300);
     res.json({ data: rows });
   } catch (err) {
     next(err);
@@ -44,7 +45,9 @@ const create = async (req, res, next) => {
   try {
     const data = req.body || {};
     const product = await productModel.createProduct(data);
+    cache.clear();
     res.status(201).json({ data: product });
+    setImmediate(() => n8n.notifyProductCreated(product, req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (err) {
     next(err);
   }
@@ -56,7 +59,9 @@ const update = async (req, res, next) => {
     const data = req.body || {};
     const product = await productModel.updateProduct(id, data);
     if (!product) return res.status(404).json({ error: 'Not found' });
+    cache.clear();
     res.json({ data: product });
+    setImmediate(() => n8n.notifyProductUpdated(product, req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (err) {
     next(err);
   }
@@ -69,6 +74,7 @@ const destroy = async (req, res, next) => {
     if (!product) return res.status(404).json({ error: 'Not found' });
     cache.clear();
     res.json({ data: product });
+    setImmediate(() => n8n.notifyProductDeleted(product, req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (err) {
     next(err);
   }

@@ -10,41 +10,62 @@ const listProducts = async (opts = {}) => {
     search = null,
   } = opts;
 
-  // Build selected fields — avoid fetching large text fields by default
   const fields = [
-    'p.id', 'p.name', 'p.slug', 'p.price', 'p.purchase_price', 'p.image_url', 'p.featured', 'p.stock', 'p.in_stock', 'p.created_at'
+    'p.id', 'p.name', 'p.slug', 'p.price',
+    'p.image_url', 'p.featured', 'p.stock', 'p.in_stock', 'p.created_at',
   ];
-
-  // include short_description only if explicitly asked (not in opts currently)
-
-  // Join category
-  let sql = `SELECT ${fields.join(', ')}, jsonb_build_object('id', c.id, 'name', c.name) AS category`;
-
-  if (includeImages) {
-    sql += `, (
-        SELECT coalesce(jsonb_agg(jsonb_build_object('url', pi.url, 'alt', pi.alt, 'order', pi.position) ORDER BY pi.position), '[]'::jsonb)
-        FROM app.product_images pi WHERE pi.product_id = p.id
-      ) AS images`;
-  }
-
-  sql += ` FROM app.products p LEFT JOIN app.categories c ON p.category_id = c.id WHERE p.is_active = true`;
 
   const params = [];
   let idx = 1;
+  const where = ['p.is_active = true'];
+
   if (category_id) {
-    sql += ` AND p.category_id = $${idx}`;
+    where.push(`p.category_id = $${idx}`);
     params.push(category_id);
     idx++;
   }
   if (search) {
-    sql += ` AND (p.name ILIKE $${idx} OR p.short_description ILIKE $${idx} OR p.description ILIKE $${idx})`;
+    where.push(`(p.name ILIKE $${idx} OR p.short_description ILIKE $${idx} OR p.description ILIKE $${idx})`);
     params.push(`%${search}%`);
     idx++;
   }
 
-  sql += ` ORDER BY p.created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`;
-  params.push(limit, offset);
+  const whereClause = `WHERE ${where.join(' AND ')}`;
 
+  // Single query with LEFT JOIN — avoids one correlated subquery per product (N+1)
+  let sql;
+  if (includeImages) {
+    sql = `
+      SELECT ${fields.join(', ')},
+        jsonb_build_object('id', c.id, 'name', c.name) AS category,
+        COALESCE(
+          jsonb_agg(
+            jsonb_build_object('url', pi.url, 'alt', pi.alt, 'order', pi.position)
+            ORDER BY pi.position
+          ) FILTER (WHERE pi.id IS NOT NULL),
+          '[]'::jsonb
+        ) AS images
+      FROM app.products p
+      LEFT JOIN app.categories c ON p.category_id = c.id
+      LEFT JOIN app.product_images pi ON pi.product_id = p.id
+      ${whereClause}
+      GROUP BY p.id, c.id, c.name
+      ORDER BY p.created_at DESC
+      LIMIT $${idx} OFFSET $${idx + 1}
+    `;
+  } else {
+    sql = `
+      SELECT ${fields.join(', ')},
+        jsonb_build_object('id', c.id, 'name', c.name) AS category
+      FROM app.products p
+      LEFT JOIN app.categories c ON p.category_id = c.id
+      ${whereClause}
+      ORDER BY p.created_at DESC
+      LIMIT $${idx} OFFSET $${idx + 1}
+    `;
+  }
+
+  params.push(limit, offset);
   const { rows } = await db.query(sql, params);
   return rows;
 };
@@ -65,7 +86,7 @@ const getProduct = async (id) => {
 
 const createProduct = async (data) => {
   const {
-    sku, name, slug, description, price, purchase_price = 0, stock = 0, is_active = true,
+    sku, name, slug, description, price, stock = 0, is_active = true,
     category_id, price_ht = null, tva_rate = null, threshold = null,
     in_stock = true, featured = false, short_description = null, tags = null, image_url = null
   } = data;
@@ -74,10 +95,10 @@ const createProduct = async (data) => {
   const derivedImageUrl = image_url || (data.images && Array.isArray(data.images) && data.images.length ? data.images.find(img => img.is_primary)?.url || data.images[0].url : null);
 
   const { rows } = await db.query(
-    `INSERT INTO app.products (sku, name, slug, description, price, purchase_price, stock, is_active, category_id, price_ht, tva_rate, threshold, in_stock, featured, short_description, tags, image_url)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+    `INSERT INTO app.products (sku, name, slug, description, price, stock, is_active, category_id, price_ht, tva_rate, threshold, in_stock, featured, short_description, tags, image_url)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      RETURNING *`,
-    [sku, name, slug, description, price, purchase_price || 0, stock, is_active, category_id, price_ht, tva_rate, threshold, in_stock, featured, short_description, tags ? JSON.stringify(tags) : null, derivedImageUrl]
+    [sku, name, slug, description, price, stock, is_active, category_id, price_ht, tva_rate, threshold, in_stock, featured, short_description, tags ? JSON.stringify(tags) : null, derivedImageUrl]
   );
 
   const product = rows[0];
@@ -100,24 +121,26 @@ const updateProduct = async (id, data) => {
   const existing = await getProduct(id);
   if (!existing) return null;
 
+  const toInt  = v => (v === '' || v === null || v === undefined) ? null : parseInt(v, 10);
+  const toNum  = v => (v === '' || v === null || v === undefined) ? null : parseFloat(v);
+  const toStr  = v => (v === '' || v === null || v === undefined) ? null : v;
+
   const merged = {
-    sku: data.sku !== undefined ? data.sku : existing.sku,
-    name: data.name !== undefined ? data.name : existing.name,
-    slug: data.slug !== undefined ? data.slug : existing.slug,
-    description: data.description !== undefined ? data.description : existing.description,
-    price: data.price !== undefined ? data.price : existing.price,
-    purchase_price: data.purchase_price !== undefined ? data.purchase_price : (existing.purchase_price || 0),
-    stock: data.stock !== undefined ? data.stock : existing.stock,
-    is_active: data.is_active !== undefined ? data.is_active : existing.is_active,
-    category_id: data.category_id !== undefined ? data.category_id : existing.category_id,
-    price_ht: data.price_ht !== undefined ? data.price_ht : existing.price_ht,
-    tva_rate: data.tva_rate !== undefined ? data.tva_rate : existing.tva_rate,
-    threshold: data.threshold !== undefined ? data.threshold : existing.threshold,
-    in_stock: data.in_stock !== undefined ? data.in_stock : existing.in_stock,
-    featured: data.featured !== undefined ? data.featured : existing.featured,
-    short_description: data.short_description !== undefined ? data.short_description : existing.short_description,
-    tags: data.tags !== undefined ? data.tags : existing.tags,
-    image_url: data.image_url !== undefined ? data.image_url : existing.image_url
+    sku:               toStr(data.sku   !== undefined ? data.sku   : existing.sku),
+    name:              data.name  !== undefined ? data.name  : existing.name,
+    slug:              data.slug  !== undefined ? data.slug  : existing.slug,
+    description:       toStr(data.description  !== undefined ? data.description  : existing.description),
+    price:             toNum(data.price !== undefined ? data.price : existing.price),
+    is_active:         data.is_active !== undefined ? data.is_active : existing.is_active,
+    category_id:       toInt(data.category_id !== undefined ? data.category_id : existing.category_id),
+    price_ht:          toNum(data.price_ht  !== undefined ? data.price_ht  : existing.price_ht),
+    tva_rate:          toNum(data.tva_rate  !== undefined ? data.tva_rate  : existing.tva_rate),
+    threshold:         toInt(data.threshold !== undefined ? data.threshold : existing.threshold),
+    in_stock:          data.in_stock !== undefined ? data.in_stock : existing.in_stock,
+    featured:          data.featured !== undefined ? data.featured : existing.featured,
+    short_description: toStr(data.short_description !== undefined ? data.short_description : existing.short_description),
+    tags:              data.tags !== undefined ? data.tags : existing.tags,
+    image_url:         toStr(data.image_url !== undefined ? data.image_url : existing.image_url),
   };
 
   // derive image_url from images if provided
@@ -125,13 +148,16 @@ const updateProduct = async (id, data) => {
     merged.image_url = data.images.find(img => img.is_primary)?.url || data.images[0].url;
   }
 
+  // stock is intentionally excluded — use stock movements to adjust inventory
+
   const { rows } = await db.query(
     `UPDATE app.products SET
-      sku = $1, name = $2, slug = $3, description = $4, price = $5, purchase_price = $6, stock = $7, is_active = $8, category_id = $9,
-      price_ht = $10, tva_rate = $11, threshold = $12, in_stock = $13, featured = $14, short_description = $15, tags = $16, image_url = $17
-     WHERE id = $18
+      sku = $1, name = $2, slug = $3, description = $4, price = $5, is_active = $6, category_id = $7,
+      price_ht = $8, tva_rate = $9, threshold = $10, in_stock = $11, featured = $12,
+      short_description = $13, tags = $14, image_url = $15
+     WHERE id = $16
      RETURNING *`,
-    [merged.sku, merged.name, merged.slug, merged.description, merged.price, merged.purchase_price || 0, merged.stock, merged.is_active, merged.category_id, merged.price_ht, merged.tva_rate, merged.threshold, merged.in_stock, merged.featured, merged.short_description, merged.tags ? JSON.stringify(merged.tags) : null, merged.image_url, id]
+    [merged.sku, merged.name, merged.slug, merged.description, merged.price, merged.is_active, merged.category_id, merged.price_ht, merged.tva_rate, merged.threshold, merged.in_stock, merged.featured, merged.short_description, merged.tags ? JSON.stringify(merged.tags) : null, merged.image_url, id]
   );
 
   const product = rows[0];
