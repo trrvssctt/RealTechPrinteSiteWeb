@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Package, ShoppingCart, DollarSign, TrendingUp, Calendar, TrendingDown, Users, ShoppingBag, Mail, ArrowUpRight, ArrowDownRight, Eye, BarChart3 } from "lucide-react";
+import { Package, ShoppingCart, DollarSign, TrendingUp, Calendar, TrendingDown, Users, ShoppingBag, Mail, ArrowUpRight, ArrowDownRight, Eye, BarChart3, Wallet, Activity, CheckCircle, AlertCircle, Clock } from "lucide-react";
 import { Link } from 'react-router-dom';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
@@ -45,6 +45,12 @@ const Dashboard = () => {
   const [categoriesData, setCategoriesData] = useState<any[]>([]);
   const [unreadMessages, setUnreadMessages] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const [dailyStats, setDailyStats] = useState({
+    todayRevenue: 0,
+    todayDepensesValidees: 0,
+    todayDepensesEnAttente: 0,
+    todayOrdersCount: 0,
+  });
 
   useEffect(() => {
     fetchStats();
@@ -140,6 +146,41 @@ const Dashboard = () => {
 
       const allOrders = Array.isArray(ordersJson.data) ? ordersJson.data : [];
       const allCarts = Array.isArray(cartsJson.data) ? cartsJson.data : [];
+
+      // ── Bilan journalier ────────────────────────────────────────────────────
+      const todayISO = format(new Date(), 'yyyy-MM-dd');
+      const todayStart = startOfDay(new Date());
+      const todayEnd = endOfDay(new Date());
+
+      const todayCompletedOrders = allOrders.filter((o: any) => {
+        const d = new Date(o.created_at || o.placed_at || o.createdAt);
+        return d >= todayStart && d <= todayEnd && o.status === 'completed';
+      });
+      const todayRevenueBilan = todayCompletedOrders.reduce((sum: number, o: any) => sum + Number(o.total_amount || 0), 0);
+      const todayOrdersCountBilan = allOrders.filter((o: any) => {
+        const d = new Date(o.created_at || o.placed_at || o.createdAt);
+        return d >= todayStart && d <= todayEnd;
+      }).length;
+
+      let todayDepensesValidees = 0;
+      let todayDepensesEnAttente = 0;
+      try {
+        const depResp = await apiFetch(`/api/admin/depenses?date_debut=${todayISO}&date_fin=${todayISO}`, { headers });
+        if (depResp.ok) {
+          const depJson = await depResp.json();
+          const totaux: any[] = depJson.totaux || [];
+          todayDepensesValidees = Number(totaux.find((t) => t.statut === 'valide')?.total || 0);
+          todayDepensesEnAttente = Number(totaux.find((t) => t.statut === 'en_attente')?.nb || 0);
+        }
+      } catch (e) { /* ignore */ }
+
+      setDailyStats({
+        todayRevenue: todayRevenueBilan,
+        todayDepensesValidees,
+        todayDepensesEnAttente,
+        todayOrdersCount: todayOrdersCountBilan,
+      });
+      // ────────────────────────────────────────────────────────────────────────
 
       // Filtrer par période
       const ordersInRange = allOrders.filter((o: any) => {
@@ -446,6 +487,77 @@ const Dashboard = () => {
           </Card>
         </Link>
       </div>
+
+      {/* Bilan du Jour */}
+      {(() => {
+        const benefice = dailyStats.todayRevenue - dailyStats.todayDepensesValidees;
+        const isProfit = benefice > 0;
+        const isLoss = benefice < 0;
+        return (
+          <Card className={`border-2 ${isProfit ? 'border-emerald-300 bg-emerald-50/30' : isLoss ? 'border-rose-300 bg-rose-50/30' : 'border-amber-300 bg-amber-50/30'}`}>
+            <CardHeader className="pb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Activity className={`h-5 w-5 ${isProfit ? 'text-emerald-600' : isLoss ? 'text-rose-600' : 'text-amber-600'}`} />
+                  <CardTitle className="text-lg">Bilan du Jour</CardTitle>
+                  <span className="text-sm text-muted-foreground">— {format(new Date(), 'dd MMMM yyyy', { locale: fr })}</span>
+                </div>
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold w-fit ${
+                  isProfit ? 'bg-emerald-100 text-emerald-700' :
+                  isLoss   ? 'bg-rose-100 text-rose-700' :
+                             'bg-amber-100 text-amber-700'
+                }`}>
+                  {isProfit ? <CheckCircle className="h-4 w-4" /> : isLoss ? <AlertCircle className="h-4 w-4" /> : <Activity className="h-4 w-4" />}
+                  {isProfit ? 'Bénéficiaire' : isLoss ? 'Déficitaire' : 'À l\'équilibre'}
+                </span>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white rounded-xl p-4 border shadow-sm">
+                  <div className="flex items-center gap-2 mb-1">
+                    <ShoppingCart className="h-4 w-4 text-blue-500" />
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Commandes</span>
+                  </div>
+                  <p className="text-2xl font-bold text-foreground">{dailyStats.todayOrdersCount}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">reçues aujourd'hui</p>
+                </div>
+                <div className="bg-white rounded-xl p-4 border shadow-sm">
+                  <div className="flex items-center gap-2 mb-1">
+                    <TrendingUp className="h-4 w-4 text-emerald-500" />
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Gains</span>
+                  </div>
+                  <p className="text-2xl font-bold text-emerald-600">{dailyStats.todayRevenue.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">FCFA (commandes complétées)</p>
+                </div>
+                <div className="bg-white rounded-xl p-4 border shadow-sm">
+                  <div className="flex items-center gap-2 mb-1">
+                    <TrendingDown className="h-4 w-4 text-rose-500" />
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Dépenses</span>
+                  </div>
+                  <p className="text-2xl font-bold text-rose-600">{dailyStats.todayDepensesValidees.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    FCFA validées
+                    {dailyStats.todayDepensesEnAttente > 0 && (
+                      <span className="ml-1 inline-flex items-center gap-0.5 text-amber-600 font-medium">
+                        <Clock className="h-3 w-3" />{dailyStats.todayDepensesEnAttente} en attente
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <div className={`rounded-xl p-4 border shadow-sm ${isProfit ? 'bg-emerald-500' : isLoss ? 'bg-rose-500' : 'bg-amber-400'}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Wallet className="h-4 w-4 text-white/80" />
+                    <span className="text-xs font-medium text-white/80 uppercase tracking-wide">Bénéfice net</span>
+                  </div>
+                  <p className="text-2xl font-bold text-white">{benefice >= 0 ? '+' : ''}{benefice.toLocaleString()}</p>
+                  <p className="text-xs text-white/70 mt-0.5">FCFA aujourd'hui</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Main Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

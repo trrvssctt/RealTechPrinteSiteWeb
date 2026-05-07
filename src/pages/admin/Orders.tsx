@@ -3315,433 +3315,394 @@ const formatDate = (dateString: string) => {
 
       {/* Create Order Modal */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="w-full max-w-6xl max-h-[95dvh] overflow-hidden flex flex-col p-0">
+        <DialogContent className="w-full max-w-5xl p-0 gap-0 flex flex-col" style={{ height: '88vh', maxHeight: '88vh', overflow: 'hidden' }}>
 
           {/* ── Header ── */}
-          <div className={`px-5 pt-5 pb-4 border-b ${saleType === 'direct_sale' ? 'bg-emerald-50' : 'bg-blue-50/50'}`}>
-            <div className="flex items-start justify-between gap-4">
+          <div className={`px-5 pt-4 pb-3 border-b shrink-0 ${saleType === 'direct_sale' ? 'bg-emerald-50' : 'bg-blue-50/50'}`}>
+            <div className="flex items-center justify-between gap-4">
               <div>
-                <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                <DialogTitle className="text-lg font-bold flex items-center gap-2">
                   {saleType === 'direct_sale'
                     ? <><CreditCard className="w-5 h-5 text-emerald-600" /> Vente directe / Encaissement</>
-                    : <><ShoppingCart className="w-5 h-5 text-blue-600" /> Nouvelle commande</>
-                  }
+                    : <><ShoppingCart className="w-5 h-5 text-blue-600" /> Nouvelle commande</>}
                 </DialogTitle>
-                <DialogDescription className="mt-0.5">
+                <DialogDescription className="text-xs mt-0.5">
                   {saleType === 'direct_sale'
-                    ? 'Client présent en boutique — stock décrémento immédiatement, paiement encaissé.'
+                    ? 'Client présent — stock décrémenté immédiatement, paiement encaissé.'
                     : 'Commande à préparer — statut "en attente", livraison possible.'}
                 </DialogDescription>
               </div>
-
-              {/* Type toggle */}
-              <div className="flex rounded-lg border overflow-hidden shrink-0">
-                <button
-                  onClick={() => setSaleType('direct_sale')}
-                  className={`px-3 py-1.5 text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                    saleType === 'direct_sale'
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-white text-muted-foreground hover:bg-muted'
-                  }`}
-                >
-                  <CreditCard className="w-3.5 h-3.5" /> Vente directe
-                </button>
-                <button
-                  onClick={() => setSaleType('order')}
-                  className={`px-3 py-1.5 text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                    saleType === 'order'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-white text-muted-foreground hover:bg-muted'
-                  }`}
-                >
-                  <ShoppingCart className="w-3.5 h-3.5" /> Commande
-                </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {/* Type toggle */}
+                <div className="flex rounded-lg border overflow-hidden">
+                  <button onClick={() => setSaleType('direct_sale')}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 ${saleType === 'direct_sale' ? 'bg-emerald-600 text-white' : 'bg-white text-muted-foreground hover:bg-muted'}`}>
+                    <CreditCard className="w-3.5 h-3.5" /> Vente directe
+                  </button>
+                  <button onClick={() => setSaleType('order')}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 ${saleType === 'order' ? 'bg-blue-600 text-white' : 'bg-white text-muted-foreground hover:bg-muted'}`}>
+                    <ShoppingCart className="w-3.5 h-3.5" /> Commande
+                  </button>
+                </div>
+                {/* Mobile tabs */}
+                <div className="flex lg:hidden rounded-lg border overflow-hidden">
+                  <button onClick={() => setCreateTab('catalogue')}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1 ${createTab === 'catalogue' ? 'bg-primary text-primary-foreground' : 'bg-white text-muted-foreground'}`}>
+                    <Package className="w-3.5 h-3.5" /> Catalogue
+                    {newOrderItemsLocal.length > 0 && <span className="bg-primary-foreground text-primary text-xs rounded-full px-1 font-bold">{newOrderItemsLocal.length}</span>}
+                  </button>
+                  <button onClick={() => setCreateTab('panier')}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1 ${createTab === 'panier' ? 'bg-primary text-primary-foreground' : 'bg-white text-muted-foreground'}`}>
+                    <ShoppingCart className="w-3.5 h-3.5" /> Panier
+                  </button>
+                </div>
               </div>
-            </div>
-
-            {/* Mobile tab selector */}
-            <div className="flex lg:hidden mt-3 rounded-lg border overflow-hidden">
-              <button
-                onClick={() => setCreateTab('catalogue')}
-                className={`flex-1 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${createTab === 'catalogue' ? 'bg-primary text-primary-foreground' : 'bg-white text-muted-foreground'}`}
-              >
-                <Package className="w-4 h-4" />
-                Catalogue
-                {newOrderItemsLocal.length > 0 && <span className="ml-1 bg-primary-foreground text-primary text-xs rounded-full px-1.5 py-0.5 font-bold">{newOrderItemsLocal.length}</span>}
-              </button>
-              <button
-                onClick={() => setCreateTab('panier')}
-                className={`flex-1 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${createTab === 'panier' ? 'bg-primary text-primary-foreground' : 'bg-white text-muted-foreground'}`}
-              >
-                <ShoppingCart className="w-4 h-4" />
-                Panier & Client
-              </button>
             </div>
           </div>
 
-          {/* ── Body ── */}
-          <div className="flex-1 min-h-0">
-            <div className="h-full grid grid-cols-1 lg:grid-cols-5">
+          {/* ── Body : flex-row, chaque colonne gère son propre scroll ── */}
+          <div className="flex flex-1 overflow-hidden" style={{ minHeight: 0 }}>
 
-              {/* ── Catalogue (left) ── */}
-              <div className={`lg:col-span-3 flex flex-col h-full border-r ${createTab === 'panier' ? 'hidden lg:flex' : 'flex'}`}>
-                {/* Toolbar sticky */}
-                <div className="p-3 border-b bg-background shrink-0 space-y-2">
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <div className="flex rounded-lg border overflow-hidden shrink-0">
-                      <button
-                        onClick={() => setShowServices(false)}
-                        className={`px-3 py-1.5 text-sm font-medium transition-colors ${!showServices ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
-                      >
-                        Produits
-                      </button>
-                      <button
-                        onClick={() => setShowServices(true)}
-                        className={`px-3 py-1.5 text-sm font-medium transition-colors ${showServices ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
-                      >
-                        Services
-                      </button>
-                    </div>
-                    <div className="relative flex-1 min-w-[140px]">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-3.5 h-3.5" />
-                      <Input
-                        placeholder={showServices ? 'Rechercher service…' : 'Rechercher produit…'}
-                        value={showServices ? serviceSearch : productSearch}
-                        onChange={e => showServices ? setServiceSearch(e.target.value) : setProductSearch(e.target.value)}
-                        className="pl-8 h-8 text-sm"
-                      />
-                    </div>
+            {/* ── Gauche : Catalogue ── */}
+            <div className={`flex flex-col border-r overflow-hidden ${createTab === 'panier' ? 'hidden lg:flex' : 'flex'}`}
+              style={{ width: '58%', minWidth: 0 }}>
+
+              {/* Barre de recherche + filtres */}
+              <div className="p-3 border-b shrink-0 space-y-2 bg-background">
+                <div className="flex flex-wrap gap-2 items-center">
+                  <div className="flex rounded-lg border overflow-hidden shrink-0">
+                    <button onClick={() => setShowServices(false)}
+                      className={`px-3 py-1.5 text-sm font-medium transition-colors ${!showServices ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}>
+                      Produits
+                    </button>
+                    <button onClick={() => setShowServices(true)}
+                      className={`px-3 py-1.5 text-sm font-medium transition-colors ${showServices ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}>
+                      Services
+                    </button>
                   </div>
-                  {!showServices && (
-                    <Select value={productCategoryFilter} onValueChange={setProductCategoryFilter}>
-                      <SelectTrigger className="w-full h-8 text-sm">
-                        <SelectValue placeholder="Toutes catégories" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Toutes catégories</SelectItem>
-                        {categories?.map(cat => (
-                          <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    {showServices ? filteredServices.length : filteredProducts.length} résultat(s)
-                  </p>
+                  <div className="relative flex-1 min-w-[140px]">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-3.5 h-3.5" />
+                    <Input
+                      placeholder={showServices ? 'Rechercher service…' : 'Rechercher produit…'}
+                      value={showServices ? serviceSearch : productSearch}
+                      onChange={e => showServices ? setServiceSearch(e.target.value) : setProductSearch(e.target.value)}
+                      className="pl-8 h-8 text-sm" />
+                  </div>
                 </div>
-
-                {/* Items list — scrollable */}
-                <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
-                    {showServices ? (
-                      filteredServices.length === 0 ? (
-                        <div className="text-center py-12 text-muted-foreground">
-                          <Package className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                          <p className="text-sm">Aucun service trouvé</p>
-                        </div>
-                      ) : filteredServices.map(s => (
-                        <div key={s.id} className="flex items-center gap-3 p-3 rounded-lg border hover:border-primary/50 hover:bg-muted/30 transition-all">
-                          <div className="w-9 h-9 rounded-md bg-purple-100 flex items-center justify-center shrink-0">
-                            <Package className="w-4 h-4 text-purple-600" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm truncate">{s.name}</div>
-                            {s.description && <div className="text-xs text-muted-foreground truncate">{s.description}</div>}
-                          </div>
-                          <div className="text-sm font-semibold shrink-0">{formatCurrency(Number(s.price || 0))}</div>
-                          <Button size="sm" className="h-8 shrink-0" onClick={() => { addServiceToOrder(s); setCreateTab('panier'); }}>
-                            <Plus className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
-                      ))
-                    ) : (
-                      filteredProducts.length === 0 ? (
-                        <div className="text-center py-12 text-muted-foreground">
-                          <Package className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                          <p className="text-sm">Aucun produit trouvé</p>
-                        </div>
-                      ) : filteredProducts.map(p => (
-                        <div key={p.id} className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${p.stock <= 0 ? 'opacity-50' : 'hover:border-primary/50 hover:bg-muted/30'}`}>
-                          <div className="w-9 h-9 rounded-md bg-blue-100 flex items-center justify-center shrink-0">
-                            <Package className="w-4 h-4 text-blue-600" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-medium text-sm truncate">{p.name}</span>
-                              {p.stock <= 0 && <span className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded px-1.5">Rupture</span>}
-                              {p.stock > 0 && p.stock <= 10 && <span className="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5">Stock faible</span>}
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                              <span>{p.category?.name || 'Non catégorisé'}</span>
-                              <span>·</span>
-                              <span className={`font-medium ${p.stock > 10 ? 'text-emerald-600' : 'text-amber-600'}`}>{p.stock || 0} en stock</span>
-                            </div>
-                          </div>
-                          <div className="text-sm font-semibold shrink-0">{formatCurrency(Number(p.price || 0))}</div>
-                          <Button size="sm" className="h-8 shrink-0" disabled={p.stock <= 0} onClick={() => { addProductToOrder(p); setCreateTab('panier'); }}>
-                            <Plus className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
-                      ))
-                    )}
-                </div>
+                {!showServices && (
+                  <Select value={productCategoryFilter} onValueChange={setProductCategoryFilter}>
+                    <SelectTrigger className="w-full h-8 text-sm">
+                      <SelectValue placeholder="Toutes catégories" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Toutes catégories</SelectItem>
+                      {categories?.map(cat => (
+                        <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {showServices ? filteredServices.length : filteredProducts.length} résultat(s)
+                </p>
               </div>
 
-              {/* ── Panier + Client (right) ── */}
-              <div className={`lg:col-span-2 h-full overflow-y-auto ${createTab === 'catalogue' ? 'hidden lg:block' : 'block'}`}>
-
-                {/* Client */}
-                <div className="p-4 border-b">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm font-semibold flex items-center gap-1.5">
-                      <User className="w-4 h-4" />
-                      Client
-                      {saleType === 'order' && !onlyServices && <span className="text-red-500 text-xs ml-1">*requis</span>}
-                      {saleType === 'direct_sale' && <span className="text-xs text-muted-foreground ml-1">(optionnel)</span>}
-                    </p>
-                    {orderClient && (
-                      <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setOrderClient(null)}>
-                        <X className="w-3.5 h-3.5" />
-                      </Button>
-                    )}
-                  </div>
-
-                  {orderClient ? (
-                    <div className={`flex items-center gap-2.5 p-2.5 rounded-lg border-2 ${saleType === 'direct_sale' ? 'border-emerald-300 bg-emerald-50' : 'border-blue-300 bg-blue-50'}`}>
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white text-sm font-bold shrink-0">
-                        {(orderClient.full_name || orderClient.name || 'C')[0].toUpperCase()}
+              {/* Liste scrollable */}
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {showServices ? (
+                  filteredServices.length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <Package className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                      <p className="text-sm">Aucun service trouvé</p>
+                    </div>
+                  ) : filteredServices.map(s => (
+                    <div key={s.id} className="flex items-center gap-3 p-3 rounded-lg border hover:border-primary/50 hover:bg-muted/30 transition-all">
+                      <div className="w-9 h-9 rounded-md bg-purple-100 flex items-center justify-center shrink-0">
+                        <Package className="w-4 h-4 text-purple-600" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium text-sm truncate">{orderClient.full_name || orderClient.name}</div>
-                        <div className="text-xs text-muted-foreground truncate">{orderClient.email || orderClient.phone}</div>
+                        <div className="font-medium text-sm truncate">{s.name}</div>
+                        {s.description && <div className="text-xs text-muted-foreground truncate">{s.description}</div>}
                       </div>
-                      <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <div className="text-sm font-semibold shrink-0">{formatCurrency(Number(s.price || 0))}</div>
+                      <Button size="sm" className="h-8 shrink-0" onClick={() => { addServiceToOrder(s); setCreateTab('panier'); }}>
+                        <Plus className="w-3.5 h-3.5" />
+                      </Button>
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-3.5 h-3.5" />
-                        <Input placeholder="Rechercher client…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} className="pl-8 h-8 text-sm" />
-                      </div>
-                      <div className="max-h-36 overflow-y-auto space-y-1">
-                        {filteredClients.length === 0
-                          ? <p className="text-xs text-muted-foreground text-center py-3">Aucun client trouvé</p>
-                          : filteredClients.slice(0, 20).map(c => (
-                            <div key={c.id} onClick={() => setOrderClient(c)} className="flex items-center gap-2 p-2 rounded-md hover:bg-muted cursor-pointer transition-colors">
-                              <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold shrink-0">
-                                {(c.full_name || c.name || 'C')[0].toUpperCase()}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium truncate">{c.full_name || c.name || 'Sans nom'}</div>
-                                <div className="text-xs text-muted-foreground truncate">{c.email || c.phone}</div>
-                              </div>
-                            </div>
-                          ))
-                        }
-                      </div>
+                  ))
+                ) : (
+                  filteredProducts.length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <Package className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                      <p className="text-sm">Aucun produit trouvé</p>
                     </div>
+                  ) : filteredProducts.map(p => (
+                    <div key={p.id} className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${p.stock <= 0 ? 'opacity-50' : 'hover:border-primary/50 hover:bg-muted/30'}`}>
+                      <div className="w-9 h-9 rounded-md bg-blue-100 flex items-center justify-center shrink-0">
+                        <Package className="w-4 h-4 text-blue-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-medium text-sm truncate">{p.name}</span>
+                          {p.stock <= 0 && <span className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded px-1.5">Rupture</span>}
+                          {p.stock > 0 && p.stock <= 10 && <span className="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5">Stock faible</span>}
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                          <span>{p.category?.name || 'Non catégorisé'}</span>
+                          <span>·</span>
+                          <span className={`font-medium ${p.stock > 10 ? 'text-emerald-600' : 'text-amber-600'}`}>{p.stock || 0} en stock</span>
+                        </div>
+                      </div>
+                      <div className="text-sm font-semibold shrink-0">{formatCurrency(Number(p.price || 0))}</div>
+                      <Button size="sm" className="h-8 shrink-0" disabled={p.stock <= 0}
+                        onClick={() => { addProductToOrder(p); setCreateTab('panier'); }}>
+                        <Plus className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* ── Droite : Panier + Client + Résumé ── */}
+            <div className={`flex flex-col overflow-hidden bg-background ${createTab === 'catalogue' ? 'hidden lg:flex' : 'flex'}`}
+              style={{ width: '42%', minWidth: 0 }}>
+
+              {/* Client */}
+              <div className="px-4 pt-3 pb-3 border-b shrink-0">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-semibold flex items-center gap-1.5">
+                    <User className="w-4 h-4" />
+                    Client
+                    {saleType === 'order' && !onlyServices && <span className="text-red-500 text-xs ml-1">*requis</span>}
+                    {saleType === 'direct_sale' && <span className="text-xs text-muted-foreground ml-1">(optionnel)</span>}
+                  </p>
+                  {orderClient && (
+                    <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setOrderClient(null)}>
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
                   )}
                 </div>
-
-                {/* Cart items */}
-                <div className="p-4 border-b">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm font-semibold flex items-center gap-1.5">
-                      <ShoppingCart className="w-4 h-4" />
-                      Panier
-                      {newOrderItemsLocal.length > 0 && (
-                        <span className="bg-primary text-primary-foreground text-xs rounded-full px-1.5 py-0.5 font-bold">{newOrderItemsLocal.length}</span>
-                      )}
-                    </p>
-                    {newOrderItemsLocal.length > 0 && (
-                      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive" onClick={() => setNewOrderItemsLocal([])}>
-                        <Trash2 className="w-3.5 h-3.5 mr-1" /> Vider
-                      </Button>
-                    )}
+                {orderClient ? (
+                  <div className={`flex items-center gap-2.5 p-2.5 rounded-lg border-2 ${saleType === 'direct_sale' ? 'border-emerald-300 bg-emerald-50' : 'border-blue-300 bg-blue-50'}`}>
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white text-sm font-bold shrink-0">
+                      {(orderClient.full_name || orderClient.name || 'C')[0].toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{orderClient.full_name || orderClient.name}</div>
+                      <div className="text-xs text-muted-foreground truncate">{orderClient.email || orderClient.phone}</div>
+                    </div>
+                    <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
                   </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-3.5 h-3.5" />
+                      <Input placeholder="Rechercher client…" value={clientSearch}
+                        onChange={e => setClientSearch(e.target.value)} className="pl-8 h-8 text-sm" />
+                    </div>
+                    <div className="max-h-28 overflow-y-auto space-y-1">
+                      {filteredClients.length === 0
+                        ? <p className="text-xs text-muted-foreground text-center py-2">Aucun client trouvé</p>
+                        : filteredClients.slice(0, 10).map(c => (
+                          <div key={c.id} onClick={() => setOrderClient(c)}
+                            className="flex items-center gap-2 p-2 rounded-md hover:bg-muted cursor-pointer transition-colors">
+                            <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold shrink-0">
+                              {(c.full_name || c.name || 'C')[0].toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium truncate">{c.full_name || c.name || 'Sans nom'}</div>
+                              <div className="text-xs text-muted-foreground truncate">{c.email || c.phone}</div>
+                            </div>
+                          </div>
+                        ))
+                      }
+                    </div>
+                  </div>
+                )}
+              </div>
 
+              {/* Panier — scrollable, prend tout l'espace restant */}
+              <div className="flex flex-col flex-1 overflow-hidden border-b">
+                <div className="px-4 pt-3 pb-2 flex items-center justify-between shrink-0">
+                  <p className="text-sm font-semibold flex items-center gap-1.5">
+                    <ShoppingCart className="w-4 h-4" />
+                    Panier
+                    {newOrderItemsLocal.length > 0 && (
+                      <span className="bg-primary text-primary-foreground text-xs rounded-full px-1.5 py-0.5 font-bold">
+                        {newOrderItemsLocal.length}
+                      </span>
+                    )}
+                  </p>
+                  {newOrderItemsLocal.length > 0 && (
+                    <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                      onClick={() => setNewOrderItemsLocal([])}>
+                      <Trash2 className="w-3.5 h-3.5 mr-1" /> Vider
+                    </Button>
+                  )}
+                </div>
+                <div className="flex-1 overflow-y-auto px-4 pb-3 space-y-2">
                   {newOrderItemsLocal.length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">
                       <ShoppingCart className="w-8 h-8 mx-auto mb-2 opacity-30" />
                       <p className="text-sm">Panier vide</p>
                       <p className="text-xs mt-1 opacity-70">Ajoutez des articles depuis le catalogue</p>
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {newOrderItemsLocal.map(it => {
-                        const itemId = it.product_id || it.service_id;
-                        const catalogP = Number(it.catalog_price || it.unit_price || 0);
-                        const realP    = Number(it.unit_price || 0);
-                        const hasRemise = realP < catalogP;
-                        return (
-                        <div key={itemId} className="p-2.5 rounded-lg border group hover:border-primary/40 transition-all">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-sm truncate">{it.product_name || it.service_name}</div>
-                              {/* Prix catalogue (barré si remisé) */}
-                              <div className="text-xs text-muted-foreground">
-                                Catalogue : <span className={hasRemise ? 'line-through' : ''}>{formatCurrency(catalogP)}</span>
-                              </div>
+                  ) : newOrderItemsLocal.map(it => {
+                    const itemId = it.product_id || it.service_id;
+                    const catalogP = Number(it.catalog_price || it.unit_price || 0);
+                    const realP = Number(it.unit_price || 0);
+                    const hasRemise = realP < catalogP;
+                    return (
+                      <div key={itemId} className="p-2.5 rounded-lg border group hover:border-primary/40 transition-all">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm truncate">{it.product_name || it.service_name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              Prix : <span className={hasRemise ? 'line-through' : ''}>{formatCurrency(catalogP)}</span>
                             </div>
-                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100" onClick={() => removeItem(itemId)}>
-                              <X className="w-3 h-3 text-destructive" />
+                          </div>
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
+                            onClick={() => removeItem(itemId)}>
+                            <X className="w-3 h-3 text-destructive" />
+                          </Button>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <Label className="text-xs text-muted-foreground whitespace-nowrap">Prix réel :</Label>
+                          <Input type="number" min="0" value={realP}
+                            onChange={e => updateItemRealPrice(itemId, Number(e.target.value) || 0)}
+                            className={`h-7 text-right text-sm flex-1 ${hasRemise ? 'border-amber-400 text-amber-700 font-semibold' : ''}`} />
+                          <span className="text-xs text-muted-foreground">F</span>
+                        </div>
+                        <div className="flex items-center justify-between mt-2">
+                          <div className="flex items-center gap-1">
+                            <Button variant="outline" size="sm" className="h-7 w-7 p-0" disabled={it.quantity <= 1}
+                              onClick={() => updateItemQuantity(itemId, Number(it.quantity) - 1)}>
+                              <Minus className="w-3 h-3" />
+                            </Button>
+                            <Input type="number" min="1"
+                              max={it.product_id ? getProductStock(it.product_id) : undefined}
+                              value={it.quantity} className="w-12 h-7 text-center text-sm p-1"
+                              onChange={e => {
+                                const v = Number(e.target.value) || 1;
+                                updateItemQuantity(itemId, it.product_id
+                                  ? Math.max(1, Math.min(getProductStock(it.product_id), v))
+                                  : Math.max(1, v));
+                              }} />
+                            <Button variant="outline" size="sm" className="h-7 w-7 p-0"
+                              disabled={it.product_id ? Number(it.quantity) >= getProductStock(it.product_id) : false}
+                              onClick={() => updateItemQuantity(itemId, Number(it.quantity) + 1)}>
+                              <Plus className="w-3 h-3" />
                             </Button>
                           </div>
-                          {/* Prix réel de vente (éditable) */}
-                          <div className="flex items-center gap-2 mt-1.5">
-                            <Label className="text-xs text-muted-foreground whitespace-nowrap">Prix réel :</Label>
-                            <Input
-                              type="number" min="0"
-                              value={realP}
-                              onChange={e => updateItemRealPrice(itemId, Number(e.target.value) || 0)}
-                              className={`h-7 text-right text-sm flex-1 ${hasRemise ? 'border-amber-400 text-amber-700 font-semibold' : ''}`}
-                            />
-                            <span className="text-xs text-muted-foreground">F</span>
-                          </div>
-                          <div className="flex items-center justify-between mt-2">
-                            <div className="flex items-center gap-1">
-                              <Button variant="outline" size="sm" className="h-7 w-7 p-0" disabled={it.quantity <= 1}
-                                onClick={() => updateItemQuantity(itemId, Number(it.quantity) - 1)}>
-                                <Minus className="w-3 h-3" />
-                              </Button>
-                              <Input type="number" min="1" max={it.product_id ? getProductStock(it.product_id) : undefined}
-                                value={it.quantity} className="w-12 h-7 text-center text-sm p-1"
-                                onChange={e => {
-                                  const v = Number(e.target.value) || 1;
-                                  updateItemQuantity(itemId, it.product_id ? Math.max(1, Math.min(getProductStock(it.product_id), v)) : Math.max(1, v));
-                                }} />
-                              <Button variant="outline" size="sm" className="h-7 w-7 p-0"
-                                disabled={it.product_id ? Number(it.quantity) >= getProductStock(it.product_id) : false}
-                                onClick={() => updateItemQuantity(itemId, Number(it.quantity) + 1)}>
-                                <Plus className="w-3 h-3" />
-                              </Button>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-sm font-semibold">{formatCurrency(realP * Number(it.quantity || 0))}</div>
-                              {hasRemise && <div className="text-xs text-amber-500">−{formatCurrency((catalogP - realP) * Number(it.quantity || 0))}</div>}
-                            </div>
+                          <div className="text-right">
+                            <div className="text-sm font-semibold">{formatCurrency(realP * Number(it.quantity || 0))}</div>
+                            {hasRemise && <div className="text-xs text-amber-500">−{formatCurrency((catalogP - realP) * Number(it.quantity || 0))}</div>}
                           </div>
                         </div>
-                      )})}
-                    </div>
-                  )}
-                </div>
-
-                {/* Summary + options + actions */}
-                <div className="p-4 space-y-3">
-                  {/* Totals */}
-                  <div className="space-y-1.5 text-sm">
-                    {catalogTotal > 0 && catalogTotal !== totalAmount && (
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>Total catalogue</span>
-                        <span className="line-through">{formatCurrency(catalogTotal)}</span>
                       </div>
-                    )}
-                    {catalogTotal > totalAmount && (
-                      <div className="flex justify-between text-amber-600">
-                        <span>Remise articles</span>
-                        <span>−{formatCurrency(catalogTotal - totalAmount)}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>Sous-total réel</span>
-                      <span>{formatCurrency(totalAmount)}</span>
-                    </div>
-                    <div className="flex justify-between items-center text-muted-foreground">
-                      <span>Remise globale</span>
-                      <div className="flex items-center gap-1">
-                        <Input type="number" placeholder="0" value={discount} min="0" max={totalAmount}
-                          onChange={e => setDiscount(Number(e.target.value) || 0)}
-                          className="w-20 h-7 text-right text-sm" />
-                        <span className="text-xs">F</span>
-                      </div>
-                    </div>
-                    <div className="flex justify-between font-bold text-base pt-1.5 border-t">
-                      <span>Total à régler</span>
-                      <span className={saleType === 'direct_sale' ? 'text-emerald-700' : 'text-blue-700'}>
-                        {formatCurrency(Math.max(0, totalAmount - (discount || 0)))}
-                      </span>
-                    </div>
-                    {!isEmployee && costTotal > 0 && (
-                      <div className="flex justify-between text-teal-600 font-medium pt-1 border-t">
-                        <span className="flex items-center gap-1"><TrendingUp className="w-3.5 h-3.5" /> Gain estimé</span>
-                        <span>+{formatCurrency(Math.max(0, totalAmount - (discount || 0)) - costTotal)}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Payment method (prominent for direct_sale) */}
-                  <div>
-                    <Label className={`text-xs font-semibold mb-1 block ${saleType === 'direct_sale' ? 'text-emerald-700' : 'text-muted-foreground'}`}>
-                      Mode de paiement {saleType === 'direct_sale' && <span className="text-red-500">*</span>}
-                    </Label>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {[
-                        { val: 'cash',     label: 'Espèces' },
-                        { val: 'card',     label: 'Carte' },
-                        { val: 'transfer', label: 'Virement' },
-                        { val: 'wave',     label: 'Wave/OM' },
-                      ].map(({ val, label }) => (
-                        <button key={val} onClick={() => setPaymentMethod(val)}
-                          className={`py-1.5 px-2 rounded-md border text-xs font-medium transition-all ${
-                            paymentMethod === val
-                              ? saleType === 'direct_sale'
-                                ? 'border-emerald-500 bg-emerald-100 text-emerald-800'
-                                : 'border-primary bg-primary/10 text-primary'
-                              : 'border-muted text-muted-foreground hover:border-gray-300'
-                          }`}>
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Shipping (order only) */}
-                  {saleType === 'order' && (
-                    <Select value={shippingMethod} onValueChange={setShippingMethod}>
-                      <SelectTrigger className="h-9 text-sm">
-                        <Truck className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
-                        <SelectValue placeholder="Livraison" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="pickup">Retrait en boutique</SelectItem>
-                        <SelectItem value="standard">Livraison standard</SelectItem>
-                        <SelectItem value="express">Livraison express</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-
-                  {/* Notes */}
-                  <Textarea placeholder="Notes…" value={orderNotes} onChange={e => setOrderNotes(e.target.value)} rows={2} className="text-sm resize-none" />
-
-                  {/* Validation messages */}
-                  {newOrderItemsLocal.length === 0 && (
-                    <p className="text-xs text-destructive text-center">⚠ Ajoutez au moins un article</p>
-                  )}
-                  {saleType === 'order' && !onlyServices && !orderClient && newOrderItemsLocal.length > 0 && (
-                    <p className="text-xs text-destructive text-center">⚠ Un client est requis pour une commande</p>
-                  )}
-
-                  {/* Action buttons */}
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <Button variant="outline" onClick={() => setCreateOpen(false)} className="h-10">
-                      Annuler
-                    </Button>
-                    <Button
-                      onClick={createOrderFromModal}
-                      disabled={savingOrder || newOrderItemsLocal.length === 0 || (saleType === 'order' && !onlyServices && !orderClient)}
-                      className={`h-10 font-semibold ${saleType === 'direct_sale' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}`}
-                    >
-                      {savingOrder ? (
-                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" />En cours…</>
-                      ) : saleType === 'direct_sale' ? (
-                        <><CreditCard className="w-4 h-4 mr-2" />Encaisser</>
-                      ) : (
-                        <><CheckCircle className="w-4 h-4 mr-2" />Créer la commande</>
-                      )}
-                    </Button>
-                  </div>
+                    );
+                  })}
                 </div>
               </div>
+
+              {/* Résumé + bouton — toujours visible en bas */}
+              <div className="px-4 py-3 shrink-0 bg-background border-t shadow-[0_-2px_8px_rgba(0,0,0,0.06)] space-y-3">
+                {/* Totaux */}
+                <div className="space-y-1 text-sm">
+                  {catalogTotal > 0 && catalogTotal !== totalAmount && (
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Total catalogue</span>
+                      <span className="line-through">{formatCurrency(catalogTotal)}</span>
+                    </div>
+                  )}
+                  {catalogTotal > totalAmount && (
+                    <div className="flex justify-between text-amber-600 text-xs">
+                      <span>Remise articles</span>
+                      <span>−{formatCurrency(catalogTotal - totalAmount)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center text-muted-foreground">
+                    <span>Remise globale</span>
+                    <div className="flex items-center gap-1">
+                      <Input type="number" placeholder="0" value={discount} min="0" max={totalAmount}
+                        onChange={e => setDiscount(Number(e.target.value) || 0)}
+                        className="w-18 h-7 text-right text-sm" />
+                      <span className="text-xs">F</span>
+                    </div>
+                  </div>
+                  <div className="flex justify-between font-bold text-base pt-1 border-t">
+                    <span>Total à régler</span>
+                    <span className={saleType === 'direct_sale' ? 'text-emerald-700' : 'text-blue-700'}>
+                      {formatCurrency(Math.max(0, totalAmount - (discount || 0)))}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Mode de paiement */}
+                <div>
+                  <Label className={`text-xs font-semibold mb-1 block ${saleType === 'direct_sale' ? 'text-emerald-700' : 'text-muted-foreground'}`}>
+                    Paiement {saleType === 'direct_sale' && <span className="text-red-500">*</span>}
+                  </Label>
+                  <div className="grid grid-cols-4 gap-1">
+                    {[{ val: 'cash', label: 'Espèces' }, { val: 'card', label: 'Carte' }, { val: 'transfer', label: 'Virement' }, { val: 'wave', label: 'Wave/OM' }].map(({ val, label }) => (
+                      <button key={val} onClick={() => setPaymentMethod(val)}
+                        className={`py-1.5 rounded-md border text-xs font-medium transition-all ${
+                          paymentMethod === val
+                            ? saleType === 'direct_sale' ? 'border-emerald-500 bg-emerald-100 text-emerald-800' : 'border-primary bg-primary/10 text-primary'
+                            : 'border-muted text-muted-foreground hover:border-gray-300'
+                        }`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Livraison (commande seulement) */}
+                {saleType === 'order' && (
+                  <Select value={shippingMethod} onValueChange={setShippingMethod}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <Truck className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
+                      <SelectValue placeholder="Livraison" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pickup">Retrait en boutique</SelectItem>
+                      <SelectItem value="standard">Livraison standard</SelectItem>
+                      <SelectItem value="express">Livraison express</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {/* Notes */}
+                <Textarea placeholder="Notes…" value={orderNotes} onChange={e => setOrderNotes(e.target.value)}
+                  rows={2} className="text-sm resize-none" />
+
+                {/* Messages d'erreur */}
+                {newOrderItemsLocal.length === 0 && (
+                  <p className="text-xs text-destructive text-center">⚠ Ajoutez au moins un article</p>
+                )}
+                {saleType === 'order' && !onlyServices && !orderClient && newOrderItemsLocal.length > 0 && (
+                  <p className="text-xs text-destructive text-center">⚠ Un client est requis pour cette commande</p>
+                )}
+
+                {/* Boutons d'action */}
+                <div className="grid grid-cols-2 gap-2">
+                  <Button variant="outline" onClick={() => setCreateOpen(false)} className="h-10">
+                    Annuler
+                  </Button>
+                  <Button
+                    onClick={createOrderFromModal}
+                    disabled={savingOrder || newOrderItemsLocal.length === 0 || (saleType === 'order' && !onlyServices && !orderClient)}
+                    className={`h-10 font-semibold ${saleType === 'direct_sale' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}`}>
+                    {savingOrder
+                      ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />En cours…</>
+                      : saleType === 'direct_sale'
+                        ? <><CreditCard className="w-4 h-4 mr-2" />Encaisser</>
+                        : <><CheckCircle className="w-4 h-4 mr-2" />Créer la commande</>}
+                  </Button>
+                </div>
+              </div>
+
             </div>
           </div>
         </DialogContent>

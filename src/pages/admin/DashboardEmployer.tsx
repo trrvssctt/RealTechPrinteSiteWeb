@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Package, ShoppingCart, DollarSign, TrendingUp, Calendar, TrendingDown, Users, ShoppingBag, Mail, ArrowUpRight, ArrowDownRight, Eye, BarChart3 } from "lucide-react";
+import { Package, ShoppingCart, DollarSign, TrendingUp, Calendar, TrendingDown, Users, ShoppingBag, Mail, ArrowUpRight, ArrowDownRight, Eye, BarChart3, Activity, Clock, CheckCircle } from "lucide-react";
 import { Link } from 'react-router-dom';
 import AdminLayout from '@/components/admin/AdminLayout';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -47,6 +47,12 @@ const DashboardEmployer = () => {
   const [unreadMessages, setUnreadMessages] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [isEmployee, setIsEmployee] = useState(false);
+  const [dailyStats, setDailyStats] = useState({
+    todayOrdersCount: 0,
+    todayDepensesValidees: 0,
+    todayDepensesEnAttente: 0,
+    todayDepensesNb: 0,
+  });
 
   useEffect(() => {
     fetchStats();
@@ -164,6 +170,37 @@ const DashboardEmployer = () => {
 
       const allOrders = Array.isArray(ordersJson.data) ? ordersJson.data : [];
       const allCarts = Array.isArray(cartsJson.data) ? cartsJson.data : [];
+
+      // ── Activité journalière ─────────────────────────────────────────────────
+      const todayISO = format(new Date(), 'yyyy-MM-dd');
+      const todayStart = startOfDay(new Date());
+      const todayEnd = endOfDay(new Date());
+      const todayOrdersCountBilan = allOrders.filter((o: any) => {
+        const d = new Date(o.created_at || o.placed_at || o.createdAt);
+        return d >= todayStart && d <= todayEnd;
+      }).length;
+
+      let todayDepensesValidees = 0;
+      let todayDepensesEnAttente = 0;
+      let todayDepensesNb = 0;
+      try {
+        const depResp = await apiFetch(`/api/admin/depenses?date_debut=${todayISO}&date_fin=${todayISO}`, { headers });
+        if (depResp.ok) {
+          const depJson = await depResp.json();
+          const totaux: any[] = depJson.totaux || [];
+          todayDepensesValidees = Number(totaux.find((t) => t.statut === 'valide')?.total || 0);
+          todayDepensesEnAttente = Number(totaux.find((t) => t.statut === 'en_attente')?.nb || 0);
+          todayDepensesNb = (depJson.data || []).length;
+        }
+      } catch (e) { /* ignore */ }
+
+      setDailyStats({
+        todayOrdersCount: todayOrdersCountBilan,
+        todayDepensesValidees,
+        todayDepensesEnAttente,
+        todayDepensesNb,
+      });
+      // ─────────────────────────────────────────────────────────────────────────
 
       // Filtrer par période
       const ordersInRange = allOrders.filter((o: any) => {
@@ -480,6 +517,49 @@ const DashboardEmployer = () => {
           </Card>
         </Link>
       </div>
+
+      {/* Activité du Jour */}
+      <Card className="border-2 border-blue-200 bg-blue-50/30">
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Activity className="h-5 w-5 text-blue-600" />
+            <CardTitle className="text-lg">Activité du Jour</CardTitle>
+            <span className="text-sm text-muted-foreground">— {format(new Date(), 'dd MMMM yyyy', { locale: fr })}</span>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="bg-white rounded-xl p-4 border shadow-sm">
+              <div className="flex items-center gap-2 mb-1">
+                <ShoppingCart className="h-4 w-4 text-emerald-500" />
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Commandes reçues</span>
+              </div>
+              <p className="text-2xl font-bold text-foreground">{dailyStats.todayOrdersCount}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">aujourd'hui</p>
+            </div>
+            <div className="bg-white rounded-xl p-4 border shadow-sm">
+              <div className="flex items-center gap-2 mb-1">
+                <TrendingDown className="h-4 w-4 text-rose-500" />
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Dépenses déclarées</span>
+              </div>
+              <p className="text-2xl font-bold text-foreground">{dailyStats.todayDepensesNb}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {dailyStats.todayDepensesValidees > 0
+                  ? `${dailyStats.todayDepensesValidees.toLocaleString()} FCFA validées`
+                  : 'aucune validée'}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl p-4 border shadow-sm col-span-2 lg:col-span-1">
+              <div className="flex items-center gap-2 mb-1">
+                <Clock className="h-4 w-4 text-amber-500" />
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">En attente validation</span>
+              </div>
+              <p className="text-2xl font-bold text-amber-600">{dailyStats.todayDepensesEnAttente}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">dépense{dailyStats.todayDepensesEnAttente !== 1 ? 's' : ''} à valider</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Main Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
