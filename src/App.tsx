@@ -41,6 +41,9 @@ import Stock from "./pages/admin/Stock";
 import Reports from "./pages/admin/Reports";
 import ServicesPage from "./pages/admin/Services";
 import ServiceDetails from "./pages/admin/ServiceDetails";
+import DepensesPage from "./pages/admin/Depenses";
+import AgentIA from "./pages/admin/AgentIA";
+import WhatsAppNotifs from "./pages/admin/WhatsAppNotifs";
 
 const queryClient = new QueryClient();
 
@@ -192,7 +195,10 @@ const App = () => (
               <Route path="users" element={<AdminOnly><AdminUsers /></AdminOnly>} />
               <Route path="users/:id" element={<UserDetail />} />
               <Route path="roles" element={<Roles />} />
+              <Route path="depenses" element={<DepensesPage />} />
               <Route path="rapports" element={<Reports />} />
+              <Route path="agent-ia" element={<AdminOnly><AgentIA /></AdminOnly>} />
+              <Route path="whatsapp-notifs" element={<AdminOnly><WhatsAppNotifs /></AdminOnly>} />
               <Route path="testimonials" element={<Testimonials />} />
               <Route path="contact" element={<ContactInfo />} />
               <Route path="messages" element={<AdminOnly><Contacts /></AdminOnly>} />

@@ -21,6 +21,7 @@ export interface Product {
   category: 'serigraphie' | 'flocage' | 'imprimantes';
   description: string;
   featured?: boolean;
+  stock?: number;
 }
 
 export const products: Product[] = [

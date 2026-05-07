@@ -10,6 +10,7 @@ export interface Product {
   image: string;
   category: string;
   description?: string;
+  stock?: number | null;
 }
 
 export interface CartItem extends Product {
@@ -104,6 +105,10 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const addToCart = (product: Product) => {
+    if (product.stock !== null && product.stock !== undefined && product.stock === 0) {
+      toast.error('Ce produit est en rupture de stock.');
+      return;
+    }
     setCart((prevCart) => {
       const existingItem = prevCart.find((item) => item.id === product.id);
       if (existingItem) {
