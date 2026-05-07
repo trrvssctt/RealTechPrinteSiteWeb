@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ShoppingCart, Phone, ArrowLeft } from 'lucide-react';
+import { ShoppingCart, Phone, ArrowLeft, Ban } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useCart } from '@/contexts/CartContext';
 import ProductCard from '@/components/ProductCard';
@@ -51,6 +51,7 @@ const ProductDetail = () => {
         image: p.image_url || (Array.isArray(p.images) && p.images[0]?.url) || '',
         category: getCategoryName(p.category),
         description: p.short_description || p.description || '',
+        stock: p.stock ?? null,
       };
       setProduct(mapped);
 
@@ -101,7 +102,10 @@ const ProductDetail = () => {
   );
   const whatsappLink = `https://wa.me/221774220320?text=${whatsappMessage}`;
 
+  const outOfStock = product.stock !== null && product.stock !== undefined && product.stock === 0;
+
   const handleAddToCart = () => {
+    if (outOfStock) return;
     addToCart(product);
     navigate('/panier');
   };
@@ -119,8 +123,20 @@ const ProductDetail = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 mb-16">
           {/* Image */}
           <div className="animate-scale-in">
-            <div className="aspect-square rounded-2xl overflow-hidden shadow-2xl">
-              <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+            <div className="aspect-square rounded-2xl overflow-hidden shadow-2xl relative">
+              <img
+                src={product.image}
+                alt={product.name}
+                className={`w-full h-full object-cover ${outOfStock ? 'opacity-60 grayscale' : ''}`}
+              />
+              {outOfStock && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="bg-red-600 text-white text-sm font-bold px-5 py-2.5 rounded-full shadow-xl flex items-center gap-2 rotate-[-6deg]">
+                    <Ban className="w-4 h-4" />
+                    Rupture de stock
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -138,21 +154,30 @@ const ProductDetail = () => {
             </div>
 
             <div className="space-y-4">
-              <Button variant="default" size="lg" onClick={handleAddToCart} className="w-full">
-                <ShoppingCart className="w-5 h-5 mr-2" />
-                Ajouter au panier
-              </Button>
+              {outOfStock ? (
+                <div className="w-full flex items-center justify-center gap-2 bg-red-50 border border-red-200 text-red-700 font-semibold rounded-lg py-3 px-4">
+                  <Ban className="w-5 h-5" />
+                  Produit indisponible — rupture de stock
+                </div>
+              ) : (
+                <Button variant="default" size="lg" onClick={handleAddToCart} className="w-full">
+                  <ShoppingCart className="w-5 h-5 mr-2" />
+                  Ajouter au panier
+                </Button>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Button variant="whatsapp" size="lg" asChild>
-                  <a href={whatsappLink} target="_blank" rel="noopener noreferrer">
-                    Commander sur WhatsApp
-                  </a>
-                </Button>
-                <Button variant="outline" size="lg" asChild>
+                {!outOfStock && (
+                  <Button variant="whatsapp" size="lg" asChild>
+                    <a href={whatsappLink} target="_blank" rel="noopener noreferrer">
+                      Commander sur WhatsApp
+                    </a>
+                  </Button>
+                )}
+                <Button variant="outline" size="lg" asChild className={outOfStock ? 'col-span-2' : ''}>
                   <a href="tel:+221774220320">
                     <Phone className="w-5 h-5 mr-2" />
-                    Appeler
+                    {outOfStock ? 'Nous contacter pour disponibilité' : 'Appeler'}
                   </a>
                 </Button>
               </div>

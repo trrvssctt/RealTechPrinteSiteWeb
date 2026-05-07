@@ -1,44 +1,37 @@
 import { Link } from 'react-router-dom';
 import { Printer, Palette, Shirt, Laptop, Star, CheckCircle, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import ProductCard from '@/components/ProductCard';
-import { useEffect, useState } from 'react';
-import type { Product as ProductType } from '@/data/products';
+import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
-
-async function fetchProducts() {
-  const res = await apiFetch('/api/products');
-  if (!res.ok) return [];
-  const json = await res.json();
-  return Array.isArray(json.data) ? json.data : [];
-}
 import heroImage from '@/assets/hero-serigraphie.jpg';
 
 const Home = () => {
-  const [featuredProducts, setFeaturedProducts] = useState<ProductType[]>([]);
+  const { data: allProducts = [], isLoading } = useQuery({
+    queryKey: ['products'],
+    queryFn: async () => {
+      const res = await apiFetch('/api/products');
+      if (!res.ok) return [];
+      const json = await res.json();
+      return json.data || [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
-  useEffect(() => {
-    let mounted = true;
-    fetchProducts().then((rows) => {
-      if (!mounted) return;
-      const mappedAll = rows.map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        price: p.price || 0,
-        image: p.image_url || (Array.isArray(p.images) && p.images[0]?.url) || '',
-        category: typeof p.category === 'string' ? p.category : (p.category?.name || 'serigraphie'),
-        description: p.short_description || p.description || '',
-        featured: !!p.featured,
-      }));
+  const mappedAll = (allProducts as any[]).map((p: any) => ({
+    id: p.id,
+    name: p.name,
+    price: p.price || 0,
+    image: p.image_url || (Array.isArray(p.images) && p.images[0]?.url) || '',
+    category: typeof p.category === 'string' ? p.category : (p.category?.name || 'serigraphie'),
+    description: p.short_description || p.description || '',
+    featured: !!p.featured,
+    stock: p.stock ?? null,
+  }));
 
-      // prefer products explicitly marked featured, otherwise fall back to first items
-      const featured = mappedAll.filter((p) => p.featured);
-      setFeaturedProducts(featured.length ? featured : mappedAll.slice(0, 6));
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  const featured = mappedAll.filter((p) => p.featured);
+  const featuredProducts = featured.length ? featured : mappedAll.slice(0, 6);
   const whatsappLink = 'https://wa.me/221774220320?text=Bonjour,%20je%20souhaite%20commander';
 
   const services = [
@@ -167,11 +160,20 @@ const Home = () => {
             <p className="text-muted-foreground text-lg">Découvrez notre sélection de produits populaires</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-            {featuredProducts.map((product, index) => (
-              <div key={product.id} className="animate-scale-in" style={{ animationDelay: `${index * 100}ms` }}>
-                <ProductCard product={product} />
-              </div>
-            ))}
+            {isLoading
+              ? Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="space-y-3">
+                    <Skeleton className="h-48 w-full rounded-lg" />
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-4 w-1/2" />
+                  </div>
+                ))
+              : featuredProducts.map((product, index) => (
+                  <div key={product.id} className="animate-scale-in" style={{ animationDelay: `${index * 100}ms` }}>
+                    <ProductCard product={product} />
+                  </div>
+                ))
+            }
           </div>
           <div className="text-center">
             <Button variant="outline" size="lg" asChild>
