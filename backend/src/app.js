@@ -3,7 +3,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
-dotenv.config({ path: __dirname + '/../../.env' });
+dotenv.config(); // Charge le .env du dossier courant (backend/)
+dotenv.config({ path: __dirname + '/../../.env' }); // Fallback vers le root
 
 const usersRouter = require('./routes/users');
 const productsRouter = require('./routes/products');
