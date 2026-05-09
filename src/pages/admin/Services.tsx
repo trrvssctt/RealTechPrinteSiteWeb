@@ -31,10 +31,10 @@ import { Separator } from '@/components/ui/separator';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import { 
-  Plus, Search, RefreshCw, Edit, Trash2, Eye,
+  Plus, Search, Filter, RefreshCw, Edit, Trash2, Eye,
   Clock, DollarSign, Tag, CheckCircle, XCircle,
   MoreVertical, TrendingUp, Users, BarChart3, Settings,
-  Star, Shield
+  Calendar, Star, Award, Shield, Zap
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -133,6 +133,7 @@ const ServicesPageImproved = () => {
       // ensure we have up-to-date active list
       fetchServices(false);
     }
+    
     // for other tabs rely on existing showInactive state
   }, [activeTab]);
 
@@ -238,6 +239,7 @@ const ServicesPageImproved = () => {
       name: '',
       description: '',
       price: 0,
+      purchase_price: 0,
       duration_minutes: 60,
       category: 'general',
       is_active: true,
@@ -353,14 +355,6 @@ const ServicesPageImproved = () => {
     }
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('fr-FR', {
-      style: 'currency',
-      currency: 'XOF',
-      minimumFractionDigits: 0
-    }).format(amount).replace('XOF', 'F CFA');
-  };
-
   const formatDuration = (minutes: number) => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
@@ -369,6 +363,15 @@ const ServicesPageImproved = () => {
       return `${hours}h${mins > 0 ? `${mins}min` : ''}`;
     }
     return `${mins}min`;
+  };
+
+  const formatPrice = (price: number) => {
+    // Format as Franc CFA (F CFA)
+    const formatted = new Intl.NumberFormat('fr-FR', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    }).format(price || 0);
+    return `${formatted} F CFA`;
   };
 
   const getCategoryIcon = (category: string) => {
@@ -475,7 +478,7 @@ const ServicesPageImproved = () => {
               <div>
                 <p className="text-sm font-medium text-gray-600">Prix moyen</p>
                 <h3 className="text-2xl font-bold mt-2 text-purple-600">
-                  {formatCurrency(stats.averagePrice)}
+                  {formatPrice(stats.averagePrice)}
                 </h3>
               </div>
               <div className="p-3 bg-purple-50 rounded-full">
@@ -667,7 +670,7 @@ const ServicesPageImproved = () => {
                           <div className="flex items-center gap-1">
                             <DollarSign className="h-4 w-4 text-gray-400" />
                             <span className="font-medium">
-                              {formatCurrency(service.price || 0)}
+                              {formatPrice(service.price || 0)}
                             </span>
                           </div>
                         </TableCell>
