@@ -64,10 +64,15 @@ const getClient = async (req, res, next) => {
 const createClient = async (req, res, next) => {
   try {
     const { full_name, email, phone, created_by_channel, metadata } = req.body;
-    if (!email) return res.status(400).json({ error: 'email required' });
+    if (!full_name) return res.status(400).json({ error: 'full_name required' });
+    if (!phone || !String(phone).trim()) return res.status(400).json({ error: 'phone required' });
+
     // strict duplicate prevention: if client exists by email or phone, reject
-    const existingByEmail = await clientModel.getClientByEmail(email);
-    if (existingByEmail) return res.status(409).json({ error: 'email already exists' });
+    if (email) {
+      const existingByEmail = await clientModel.getClientByEmail(email);
+      if (existingByEmail) return res.status(409).json({ error: 'email already exists' });
+    }
+    
     if (phone) {
       const existingByPhone = await clientModel.getClientByPhone(phone);
       if (existingByPhone) return res.status(409).json({ error: 'phone already exists' });
