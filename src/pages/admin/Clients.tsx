@@ -211,17 +211,30 @@ const Clients = () => {
   };
 
   const handleCreateClient = async () => {
-    if (!newClient.email.trim()) {
-      toast.error('❌ Email requis', {
-        description: 'Veuillez saisir une adresse email'
+    if (!newClient.full_name.trim()) {
+      toast.error('❌ Nom requis', {
+        description: 'Veuillez saisir le nom du client'
       });
       return;
     }
 
-    // strict client-side uniqueness check (email & phone)
+    if (!newClient.phone.trim()) {
+      toast.error('❌ Téléphone requis', {
+        description: 'Veuillez saisir le numéro de téléphone du client'
+      });
+      return;
+    }
+
+    // strict client-side uniqueness check (email & phone) - only if provided
     const normalizedEmail = (newClient.email || '').trim().toLowerCase();
     const normalizedPhone = (newClient.phone || '').replace(/\D/g, '');
-    const conflict = clients.find(c => (c.email || '').toLowerCase() === normalizedEmail || (c.phone || '').replace(/\D/g, '') === normalizedPhone);
+    
+    const conflict = clients.find(c => {
+      const emailMatch = normalizedEmail && (c.email || '').toLowerCase() === normalizedEmail;
+      const phoneMatch = normalizedPhone && (c.phone || '').replace(/\D/g, '') === normalizedPhone;
+      return emailMatch || phoneMatch;
+    });
+
     if (conflict) {
       toast.error('❌ Un client avec ce mail ou téléphone existe déjà', {
         description: 'Vérifiez les informations ou utilisez la fiche existante'
@@ -231,13 +244,20 @@ const Clients = () => {
 
     try {
       const token = localStorage.getItem('sessionToken');
+      
+      const payload = {
+        ...newClient,
+        email: newClient.email.trim() || null,
+        phone: newClient.phone.trim() || null
+      };
+
       const resp = await apiFetch('/api/admin/clients', { 
         method: 'POST', 
         headers: { 
           'Content-Type': 'application/json', 
           ...(token ? { Authorization: `Bearer ${token}` } : {})
         }, 
-        body: JSON.stringify(newClient) 
+        body: JSON.stringify(payload) 
       });
       
       if (!resp.ok) {
@@ -1067,21 +1087,20 @@ const Clients = () => {
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="email">Email *</Label>
+                <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
                   type="email"
                   placeholder="client@exemple.com"
                   value={newClient.email}
                   onChange={(e) => setNewClient({...newClient, email: e.target.value})}
-                  required
                 />
               </div>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="phone">Téléphone</Label>
+                <Label htmlFor="phone">Téléphone *</Label>
                 <Input
                   id="phone"
                   placeholder="+221 XX XXX XX XX"
