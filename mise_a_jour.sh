@@ -19,8 +19,10 @@ echo ""
 echo "[1/5] Pull GitHub..."
 cd "$PROJET"
 git fetch origin
-git checkout "$BRANCHE"
-git pull origin "$BRANCHE"
+# Force la mise à jour sans bloquer sur les fichiers locaux modifiés
+git reset --hard "origin/$BRANCHE"
+# Supprimer les fichiers non-trackés sauf node_modules et dist
+git clean -fd --exclude=node_modules --exclude=backend/node_modules --exclude=dist
 echo "      OK — code à jour"
 
 # ── 2. Mettre à jour le .env backend ─────────────────────────────
