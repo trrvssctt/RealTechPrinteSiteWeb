@@ -144,9 +144,9 @@ app.use('/api/admin/agent',   adminAgentRouter);
 app.use('/api/admin/invoices', adminInvoicesRouter);
 
 // ─── Rapport journalier automatique à 22h00 ────────────────────────────────
-// Route manuelle pour forcer le rapport (admin uniquement)
-const adminAuth = require('./middleware/adminAuth');
-app.post('/api/admin/rapport-journalier/envoyer', adminAuth, async (req, res) => {
+// Route manuelle pour forcer le rapport (admin ou employé ; l'envoi part toujours vers l'adresse configurée)
+const adminOrEmployeeAuth = require('./middleware/adminOrEmployeeAuth');
+app.post('/api/admin/rapport-journalier/envoyer', adminOrEmployeeAuth, async (req, res) => {
   try {
     const date = req.body.date || null; // optionnel: YYYY-MM-DD
     const result = await generateAndSendDailyReport(date);
