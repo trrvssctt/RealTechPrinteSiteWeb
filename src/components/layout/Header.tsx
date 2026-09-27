@@ -16,7 +16,6 @@ const Header = () => {
     { name: 'Accueil', path: '/' },
     { name: 'Sérigraphie', path: '/serigraphie' },
     { name: 'Flocage', path: '/flocage' },
-    { name: 'Flocage Personnalisé', path: '/flocage-personnalise' },
     { name: 'Imprimantes & Machines', path: '/imprimantes' },
     { name: 'Contact', path: '/contact' },
   ];

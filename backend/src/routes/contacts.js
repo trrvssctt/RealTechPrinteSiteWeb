@@ -33,5 +33,6 @@ router.post(
 router.get('/', adminAuth, contactController.list);
 router.get('/:id', adminAuth, contactController.get);
 router.post('/:id/handle', adminAuth, contactController.handle);
+router.delete('/:id', adminAuth, contactController.destroy);
 
 module.exports = router;

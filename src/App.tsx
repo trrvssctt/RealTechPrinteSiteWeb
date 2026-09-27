@@ -67,6 +67,15 @@ const App = () => (
                 <Footer />
               </div>
             } />
+            <Route path="/produits" element={
+              <div className="flex flex-col min-h-screen">
+                <Header />
+                <main className="flex-1">
+                  <Category />
+                </main>
+                <Footer />
+              </div>
+            } />
             <Route path="/serigraphie" element={
               <div className="flex flex-col min-h-screen">
                 <Header />

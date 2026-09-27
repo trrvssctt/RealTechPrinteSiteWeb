@@ -7,6 +7,11 @@ import flocageImg from '@/assets/flocage.jpg';
 import imprimantesImg from '@/assets/imprimantes.jpg';
 
 const categoryInfo = {
+  produits: {
+    title: 'Tous nos Produits',
+    description: 'Découvrez l’ensemble de notre catalogue : sérigraphie, flocage, imprimantes, machines et consommables.',
+    image: serigraphieImg,
+  },
   serigraphie: {
     title: 'Sérigraphie Personnalisée',
     description: 'Impression de haute qualité sur textiles, objets publicitaires et supports divers. Idéal pour événements, entreprises et promotions.',
@@ -59,6 +64,7 @@ const Category = () => {
     .filter((p) => {
       const pSlug = slugify(getCategoryName(p.category) || '');
       if (!routeSlug) return false;
+      if (routeSlug === 'produits') return true;
       return pSlug === routeSlug || pSlug.includes(routeSlug) || routeSlug.includes(pSlug);
     })
     .map((p) => ({

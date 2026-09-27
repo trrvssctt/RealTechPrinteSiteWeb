@@ -29,6 +29,15 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
@@ -93,7 +102,6 @@ type ContactMessage = {
   };
   tags?: string[];
   assigned_to?: string;
-  priority?: 'low' | 'medium' | 'high';
 };
 
 type MessageStats = {
@@ -101,7 +109,6 @@ type MessageStats = {
   unread: number;
   handled: number;
   today: number;
-  highPriority: number;
 };
 
 const Contacts = () => {
@@ -109,7 +116,7 @@ const Contacts = () => {
   const [allMessages, setAllMessages] = useState<ContactMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filter, setFilter] = useState<'all' | 'unhandled' | 'handled' | 'high'>('all');
+  const [filter, setFilter] = useState<'all' | 'unhandled' | 'handled'>('all');
   const [selectedMessage, setSelectedMessage] = useState<ContactMessage | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
@@ -117,12 +124,13 @@ const Contacts = () => {
   const [sendingReply, setSendingReply] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [replySubject, setReplySubject] = useState("");
+  const [messageToDelete, setMessageToDelete] = useState<ContactMessage | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [stats, setStats] = useState<MessageStats>({
     total: 0,
     unread: 0,
     handled: 0,
-    today: 0,
-    highPriority: 0
+    today: 0
   });
 
   const ITEMS_PER_PAGE = 10;
@@ -139,8 +147,6 @@ const Contacts = () => {
       filtered = filtered.filter(m => !m.handled);
     } else if (filter === 'handled') {
       filtered = filtered.filter(m => m.handled);
-    } else if (filter === 'high') {
-      filtered = filtered.filter(m => m.priority === 'high');
     }
 
     // Filter by search
@@ -199,8 +205,7 @@ const Contacts = () => {
       total: allMessages.length,
       unread: allMessages.filter(m => !m.handled).length,
       handled: allMessages.filter(m => m.handled).length,
-      today: allMessages.filter(m => new Date(m.created_at) >= today).length,
-      highPriority: allMessages.filter(m => m.priority === 'high').length
+      today: allMessages.filter(m => new Date(m.created_at) >= today).length
     };
 
     setStats(stats);
@@ -229,6 +234,7 @@ const Contacts = () => {
         description: `Message ${handled ? 'marqué comme traité' : 'réouvert'}`
       });
 
+      setSelectedMessage(prev => (prev?.id === id ? { ...prev, handled } : prev));
       await fetchMessages();
     } catch (err) {
       toast.error('Erreur', {
@@ -281,10 +287,14 @@ const Contacts = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Êtes-vous sûr de vouloir supprimer ce message ? Cette action est irréversible.")) {
-      return;
-    }
+  const handleDelete = (message: ContactMessage) => {
+    setMessageToDelete(message);
+  };
+
+  const confirmDelete = async () => {
+    if (!messageToDelete) return;
+    const id = messageToDelete.id;
+    setDeleting(true);
 
     const token = localStorage.getItem('sessionToken');
     const headers: Record<string,string> = {};
@@ -307,72 +317,15 @@ const Contacts = () => {
         description: 'Le message a été supprimé avec succès'
       });
 
+      setMessageToDelete(null);
+      if (selectedMessage?.id === id) setDetailsOpen(false);
       await fetchMessages();
     } catch (err) {
       toast.error('Erreur', {
         description: 'Impossible de supprimer le message'
       });
-    }
-  };
-
-  const handleAssignPriority = async (id: string, priority: 'low' | 'medium' | 'high') => {
-    const token = localStorage.getItem('sessionToken');
-    const headers: Record<string,string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    
-    try {
-      const resp = await apiFetch(`/api/contacts/${id}`, { 
-        method: 'PUT', 
-        headers,
-        body: JSON.stringify({ priority })
-      });
-      
-      if (!resp.ok) {
-        toast.error('Erreur', {
-          description: 'Impossible de modifier la priorité'
-        });
-        return;
-      }
-
-      toast.success('✅ Priorité modifiée', {
-        description: 'La priorité du message a été mise à jour'
-      });
-
-      await fetchMessages();
-      
-      if (selectedMessage?.id === id) {
-        setSelectedMessage({ ...selectedMessage, priority });
-      }
-    } catch (err) {
-      toast.error('Erreur', {
-        description: 'Impossible de modifier la priorité'
-      });
-    }
-  };
-
-  const getPriorityColor = (priority?: string) => {
-    switch (priority) {
-      case 'high':
-        return 'bg-red-100 text-red-800 border-red-200';
-      case 'medium':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'low':
-        return 'bg-green-100 text-green-800 border-green-200';
-      default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
-    }
-  };
-
-  const getPriorityIcon = (priority?: string) => {
-    switch (priority) {
-      case 'high':
-        return AlertCircle;
-      case 'medium':
-        return Clock;
-      case 'low':
-        return CheckCircle;
-      default:
-        return Clock;
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -445,7 +398,7 @@ const Contacts = () => {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -502,19 +455,6 @@ const Contacts = () => {
           </CardContent>
         </Card>
         
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Haute priorité</p>
-                <p className="text-3xl font-bold text-red-600">{stats.highPriority}</p>
-              </div>
-              <div className="w-12 h-12 rounded-lg bg-red-100 flex items-center justify-center">
-                <AlertCircle className="h-6 w-6 text-red-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Search and Filters */}
@@ -540,7 +480,6 @@ const Contacts = () => {
                   <SelectItem value="all">Tous les messages</SelectItem>
                   <SelectItem value="unhandled">Non traités</SelectItem>
                   <SelectItem value="handled">Traités</SelectItem>
-                  <SelectItem value="high">Haute priorité</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -598,7 +537,6 @@ const Contacts = () => {
             <>
               <div className="space-y-4">
                 {currentMessages.map((message) => {
-                  const PriorityIcon = getPriorityIcon(message.priority);
                   return (
                     <Card 
                       key={message.id} 
@@ -621,16 +559,6 @@ const Contacts = () => {
                                 </div>
                                 <div className="text-sm text-muted-foreground flex items-center gap-2 mt-1">
                                   <span>{message.subject}</span>
-                                  {message.priority && (
-                                    <Badge 
-                                      variant="outline" 
-                                      className={`${getPriorityColor(message.priority)} text-xs`}
-                                    >
-                                      <PriorityIcon className="h-3 w-3 mr-1" />
-                                      {message.priority === 'high' ? 'Haute' : 
-                                       message.priority === 'medium' ? 'Moyenne' : 'Basse'}
-                                    </Badge>
-                                  )}
                                 </div>
                               </div>
                             </div>
@@ -710,38 +638,7 @@ const Contacts = () => {
                                     <DropdownMenuItem 
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        handleAssignPriority(message.id, 'high');
-                                      }}
-                                      className={message.priority === 'high' ? 'bg-red-50 text-red-700' : ''}
-                                    >
-                                      <AlertCircle className="mr-2 h-4 w-4" />
-                                      Haute priorité
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem 
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleAssignPriority(message.id, 'medium');
-                                      }}
-                                      className={message.priority === 'medium' ? 'bg-yellow-50 text-yellow-700' : ''}
-                                    >
-                                      <Clock className="mr-2 h-4 w-4" />
-                                      Priorité moyenne
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem 
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleAssignPriority(message.id, 'low');
-                                      }}
-                                      className={message.priority === 'low' ? 'bg-green-50 text-green-700' : ''}
-                                    >
-                                      <CheckCircle className="mr-2 h-4 w-4" />
-                                      Basse priorité
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem 
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDelete(message.id);
+                                        handleDelete(message);
                                       }}
                                       className="text-destructive"
                                     >
@@ -877,16 +774,6 @@ const Contacts = () => {
                         <Badge variant={selectedMessage.handled ? "default" : "destructive"}>
                           {selectedMessage.handled ? 'Traité' : 'Non traité'}
                         </Badge>
-                        {selectedMessage.priority && (
-                          <Badge 
-                            variant="outline" 
-                            className={`${getPriorityColor(selectedMessage.priority)} mt-2`}
-                          >
-                            <PriorityIcon className="h-3 w-3 mr-1" />
-                            {selectedMessage.priority === 'high' ? 'Haute priorité' : 
-                             selectedMessage.priority === 'medium' ? 'Priorité moyenne' : 'Basse priorité'}
-                          </Badge>
-                        )}
                       </div>
                     </div>
                   </CardContent>
@@ -957,8 +844,7 @@ const Contacts = () => {
                   variant="outline"
                   onClick={() => {
                     if (selectedMessage) {
-                      handleDelete(selectedMessage.id);
-                      setDetailsOpen(false);
+                      handleDelete(selectedMessage);
                     }
                   }}
                   className="text-destructive"
@@ -1075,6 +961,54 @@ const Contacts = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog
+        open={!!messageToDelete}
+        onOpenChange={(open) => { if (!open && !deleting) setMessageToDelete(null); }}
+      >
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <div className="mx-auto sm:mx-0 mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
+              <Trash2 className="h-6 w-6 text-red-600" />
+            </div>
+            <AlertDialogTitle>Supprimer ce message ?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                {messageToDelete && (
+                  <div className="rounded-lg border bg-muted/50 p-3 text-left">
+                    <p className="font-medium text-foreground truncate">
+                      {messageToDelete.subject || 'Sans sujet'}
+                    </p>
+                    <p className="text-sm text-muted-foreground truncate">
+                      De {messageToDelete.name} &lt;{messageToDelete.email}&gt;
+                    </p>
+                  </div>
+                )}
+                <p className="flex items-start gap-2 text-sm">
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0 text-red-600" />
+                  Ce message sera définitivement supprimé. Cette action est irréversible.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Annuler</AlertDialogCancel>
+            <Button
+              onClick={confirmDelete}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-2" />
+              )}
+              Supprimer définitivement
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

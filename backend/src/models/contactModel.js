@@ -11,7 +11,7 @@ const createContact = async ({ name, email, subject, message, ip_address = null,
 };
 
 const listContacts = async ({ limit = 100, offset = 0, handled = null, email = null } = {}) => {
-  let sql = `SELECT * FROM app.contacts`;
+  let sql = `SELECT *, is_handled AS handled FROM app.contacts`;
   const params = [];
   const where = [];
   let idx = 1;
@@ -37,13 +37,18 @@ const listContacts = async ({ limit = 100, offset = 0, handled = null, email = n
 };
 
 const getContact = async (id) => {
-  const { rows } = await db.query('SELECT * FROM app.contacts WHERE id = $1 LIMIT 1', [id]);
+  const { rows } = await db.query('SELECT *, is_handled AS handled FROM app.contacts WHERE id = $1 LIMIT 1', [id]);
   return rows[0];
 };
 
 const markHandled = async (id, handled = true) => {
-  const { rows } = await db.query('UPDATE app.contacts SET is_handled = $1 WHERE id = $2 RETURNING *', [handled, id]);
+  const { rows } = await db.query('UPDATE app.contacts SET is_handled = $1 WHERE id = $2 RETURNING *, is_handled AS handled', [handled, id]);
   return rows[0];
 };
 
-module.exports = { createContact, listContacts, getContact, markHandled };
+const deleteContact = async (id) => {
+  const { rowCount } = await db.query('DELETE FROM app.contacts WHERE id = $1', [id]);
+  return rowCount > 0;
+};
+
+module.exports = { createContact, listContacts, getContact, markHandled, deleteContact };

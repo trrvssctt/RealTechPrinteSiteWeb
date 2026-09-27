@@ -177,7 +177,7 @@ const Home = () => {
           </div>
           <div className="text-center">
             <Button variant="outline" size="lg" asChild>
-              <Link to="/serigraphie">Voir tous les produits</Link>
+              <Link to="/produits">Voir tous les produits</Link>
             </Button>
           </div>
         </div>

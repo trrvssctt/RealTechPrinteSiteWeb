@@ -162,7 +162,9 @@ const get = async (req, res, next) => {
 
 const handle = async (req, res, next) => {
   try {
-    const contact = await contactModel.markHandled(req.params.id, true);
+    // body.handled = false permet de réouvrir un message ; par défaut on marque comme traité
+    const handled = req.body?.handled !== false;
+    const contact = await contactModel.markHandled(req.params.id, handled);
     if (!contact) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true, contact });
   } catch (err) {
@@ -170,4 +172,14 @@ const handle = async (req, res, next) => {
   }
 };
 
-module.exports = { create, list, get, handle };
+const destroy = async (req, res, next) => {
+  try {
+    const deleted = await contactModel.deleteContact(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { create, list, get, handle, destroy };
