@@ -8,5 +8,6 @@ router.use(adminAuth);
 router.get('/', rapportsController.list);
 router.post('/', rapportsController.create);
 router.get('/download/:filename', rapportsController.download);
+router.get('/:id/data', rapportsController.data);
 
 module.exports = router;

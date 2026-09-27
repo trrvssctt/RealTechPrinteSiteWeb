@@ -4,6 +4,8 @@ const productController = require('../controllers/productController');
 const adminAuth = require('../middleware/adminAuth');
 
 router.get('/', productController.list);
+// Liste complète pour l'admin (inclut les produits inactifs) — doit précéder '/:id'
+router.get('/all', adminAuth, productController.listAll);
 router.get('/:id', productController.get);
 
 // Admin-protected

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,11 +19,19 @@ import logo_realtech from '../../../assets/logo_realtech.png';
 
 const EmployeeLogin = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
+  const [lockoutMsg, setLockoutMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (searchParams.get('reason') === 'session_expired') {
+      toast.warning("Votre session a expiré. Veuillez vous reconnecter.");
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,6 +40,7 @@ const EmployeeLogin = () => {
       return;
     }
     setLoading(true);
+    setLockoutMsg(null);
     try {
       const resp = await apiFetch("/api/users/login", {
         method: "POST",
@@ -40,7 +49,13 @@ const EmployeeLogin = () => {
       });
 
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || "Identifiants incorrects");
+      if (!resp.ok) {
+        if (resp.status === 429 || resp.status === 403) {
+          setLockoutMsg(data.error || "Accès refusé");
+          return;
+        }
+        throw new Error(data.error || "Identifiants incorrects");
+      }
 
       const token = data.session?.access_token || data.token || data.access_token;
       if (!token) throw new Error("Token manquant");
@@ -121,6 +136,12 @@ const EmployeeLogin = () => {
           </CardHeader>
 
           <CardContent className="pt-6">
+            {lockoutMsg && (
+              <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 flex items-start gap-2">
+                <Shield className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-500" />
+                <span>{lockoutMsg}</span>
+              </div>
+            )}
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="employee-email" className="text-sm font-medium text-gray-700 flex items-center gap-2">

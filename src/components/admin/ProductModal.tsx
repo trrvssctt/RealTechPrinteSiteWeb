@@ -37,10 +37,12 @@ export const ProductModal = ({ open, onOpenChange, product, categories, onSave }
     price_ht: "",
     tva_rate: "18",
     price: "",
+    purchase_price: "",
     stock: "0",
     threshold: "5",
     in_stock: true,
     featured: false,
+    is_active: true,
     tags: [] as string[],
     images: [] as ProductImage[]
   });
@@ -50,16 +52,18 @@ export const ProductModal = ({ open, onOpenChange, product, categories, onSave }
       setFormData({
         name: product.name || "",
         sku: product.sku || "",
-        category_id: product.category_id || "",
+        category_id: product.category_id?.toString() || "",
         short_description: product.short_description || "",
         description: product.description || "",
         price_ht: product.price_ht?.toString() || "",
         tva_rate: product.tva_rate?.toString() || "18",
         price: product.price?.toString() || "",
+        purchase_price: product.purchase_price != null ? String(Number(product.purchase_price)) : "",
         stock: product.stock?.toString() || "0",
         threshold: product.threshold?.toString() || "5",
         in_stock: product.in_stock ?? true,
         featured: product.featured || false,
+        is_active: product.is_active ?? true,
         tags: product.tags || [],
         images: product.images || (product.image_url ? [{ url: product.image_url, alt: product.name, order: 0, is_primary: true }] : [])
       });
@@ -73,10 +77,12 @@ export const ProductModal = ({ open, onOpenChange, product, categories, onSave }
         price_ht: "",
         tva_rate: "18",
         price: "",
+        purchase_price: "",
         stock: "0",
         threshold: "5",
         in_stock: true,
         featured: false,
+        is_active: true,
         tags: [],
         images: []
       });
@@ -105,6 +111,7 @@ export const ProductModal = ({ open, onOpenChange, product, categories, onSave }
         price_ht: formData.price_ht ? parseFloat(formData.price_ht) : null,
         tva_rate: formData.tva_rate ? parseFloat(formData.tva_rate) : 18,
         price: parseFloat(formData.price),
+        purchase_price: formData.purchase_price ? parseFloat(formData.purchase_price) : 0,
         stock: parseInt(formData.stock),
         threshold: parseInt(formData.threshold),
         slug: formData.name.toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, ''),
@@ -153,9 +160,12 @@ export const ProductModal = ({ open, onOpenChange, product, categories, onSave }
                   <Input
                     id="sku"
                     value={formData.sku}
-                    onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                    placeholder="RT-XXX-001"
+                    disabled
+                    placeholder={product?.sku ? undefined : "Générée automatiquement (ex: RT-FL-001)"}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Référence unique générée automatiquement à la création
+                  </p>
                 </div>
 
                 <div className="space-y-2">
@@ -166,7 +176,7 @@ export const ProductModal = ({ open, onOpenChange, product, categories, onSave }
                     </SelectTrigger>
                     <SelectContent>
                       {categories.map((cat) => (
-                        <SelectItem key={cat.id} value={cat.id}>
+                        <SelectItem key={cat.id} value={String(cat.id)}>
                           {cat.name}
                         </SelectItem>
                       ))}
@@ -213,6 +223,15 @@ export const ProductModal = ({ open, onOpenChange, product, categories, onSave }
                       onCheckedChange={(checked) => setFormData({ ...formData, featured: checked })}
                     />
                     <Label htmlFor="featured">Produit vedette</Label>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="is_active"
+                      checked={formData.is_active}
+                      onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
+                    />
+                    <Label htmlFor="is_active">Afficher sur le site</Label>
                   </div>
                 </div>
               </TabsContent>
@@ -265,17 +284,36 @@ export const ProductModal = ({ open, onOpenChange, product, categories, onSave }
                   </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="stock">Stock actuel</Label>
-                    <Input
-                      id="stock"
-                      type="number"
-                      value={formData.stock}
-                      onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                      min="0"
-                    />
-                  </div>
+                <div className="space-y-2">
+                  <Label htmlFor="purchase_price">Prix d'achat (FCFA)</Label>
+                  <Input
+                    id="purchase_price"
+                    type="number"
+                    value={formData.purchase_price}
+                    onChange={(e) => setFormData({ ...formData, purchase_price: e.target.value })}
+                    min="0"
+                  />
+                  {Number(formData.purchase_price) > 0 && Number(formData.price) > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Marge : {new Intl.NumberFormat('fr-FR').format(Number(formData.price) - Number(formData.purchase_price))} FCFA
+                      {' '}({Math.round(((Number(formData.price) - Number(formData.purchase_price)) / Number(formData.price)) * 100)}%)
+                    </p>
+                  )}
+                </div>
+
+                <div className={product ? "" : "grid grid-cols-2 gap-4"}>
+                  {!product && (
+                    <div className="space-y-2">
+                      <Label htmlFor="stock">Stock initial</Label>
+                      <Input
+                        id="stock"
+                        type="number"
+                        value={formData.stock}
+                        onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+                        min="0"
+                      />
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <Label htmlFor="threshold">Seuil d'alerte</Label>
@@ -289,7 +327,7 @@ export const ProductModal = ({ open, onOpenChange, product, categories, onSave }
                   </div>
                 </div>
 
-                {parseInt(formData.stock) <= parseInt(formData.threshold) && (
+                {!product && parseInt(formData.stock) <= parseInt(formData.threshold) && (
                   <div className="bg-destructive/10 border border-destructive/20 rounded-md p-3">
                     <p className="text-sm text-destructive font-medium">
                       ⚠️ Stock faible : Le stock est en dessous du seuil d'alerte

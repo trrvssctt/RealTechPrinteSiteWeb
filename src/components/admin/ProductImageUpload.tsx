@@ -1,8 +1,10 @@
 import { useState, useCallback } from "react";
-import { Upload, X, Star, GripVertical, Link as LinkIcon } from "lucide-react";
+import { Upload, X, Star, GripVertical, Link as LinkIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
+import { uploadImage } from "@/lib/uploadImage";
 
 interface ProductImage {
   url: string;
@@ -19,6 +21,7 @@ interface ProductImageUploadProps {
 export const ProductImageUpload = ({ images, onChange }: ProductImageUploadProps) => {
   const [dragOver, setDragOver] = useState(false);
   const [urlInput, setUrlInput] = useState("");
+  const [uploading, setUploading] = useState(false);
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -28,22 +31,30 @@ export const ProductImageUpload = ({ images, onChange }: ProductImageUploadProps
     handleFiles(files);
   }, [images]);
 
-  const handleFiles = (files: File[]) => {
-    files.forEach((file) => {
-      if (file.type.startsWith("image/")) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const newImage: ProductImage = {
-            url: e.target?.result as string,
-            alt: file.name,
-            order: images.length,
-            is_primary: images.length === 0
-          };
-          onChange([...images, newImage]);
-        };
-        reader.readAsDataURL(file);
+  const handleFiles = async (files: File[]) => {
+    setUploading(true);
+    const uploaded: ProductImage[] = [];
+    try {
+      for (const file of files) {
+        try {
+          const url = await uploadImage(file, "products");
+          uploaded.push({
+            url,
+            alt: file.name.replace(/\.[^.]+$/, ""),
+            order: images.length + uploaded.length,
+            is_primary: images.length + uploaded.length === 0
+          });
+        } catch (err: any) {
+          toast.error("❌ Échec de l'upload", { description: err.message });
+        }
       }
-    });
+      if (uploaded.length > 0) {
+        onChange([...images, ...uploaded]);
+        toast.success(`✅ ${uploaded.length} image${uploaded.length > 1 ? 's' : ''} uploadée${uploaded.length > 1 ? 's' : ''} sur Cloudinary`);
+      }
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -101,15 +112,19 @@ export const ProductImageUpload = ({ images, onChange }: ProductImageUploadProps
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
       >
-        <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+        {uploading ? (
+          <Loader2 className="mx-auto h-12 w-12 text-muted-foreground mb-4 animate-spin" />
+        ) : (
+          <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+        )}
         <p className="text-sm text-muted-foreground mb-2">
-          Glissez-déposez vos images ici
+          {uploading ? "Upload en cours vers Cloudinary..." : "Glissez-déposez vos images ici"}
         </p>
         <p className="text-xs text-muted-foreground mb-4">
           ou
         </p>
         <Label htmlFor="file-upload">
-          <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
+          <Button type="button" variant="outline" size="sm" disabled={uploading} onClick={() => document.getElementById('file-upload')?.click()}>
             Sélectionner des fichiers
           </Button>
         </Label>

@@ -41,6 +41,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { apiFetch } from '@/lib/api';
+import { uploadImage } from '@/lib/uploadImage';
 import { 
   Plus, 
   Pencil, 
@@ -74,6 +75,7 @@ const Categories = () => {
   const [categoryToDelete, setCategoryToDelete] = useState<any>(null);
   const [editingCategory, setEditingCategory] = useState<any>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -230,7 +232,10 @@ const Categories = () => {
         headers: { 'Authorization': `Bearer ${token}` } 
       });
       
-      if (!resp.ok) throw new Error('Erreur lors de la suppression');
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.message || 'Erreur lors de la suppression');
+      }
       
       toast.success('🗑️ Catégorie supprimée', {
         description: `${categoryToDelete.name} a été supprimée avec succès`
@@ -404,13 +409,33 @@ const Categories = () => {
                         variant="outline"
                         size="icon"
                         className="h-11 w-11"
-                        onClick={() => {
-                          const url = prompt("Collez l'URL de l'image:");
-                          if (url) setFormData({ ...formData, image_url: url });
-                        }}
+                        disabled={uploadingImage}
+                        title="Uploader une image"
+                        onClick={() => document.getElementById('category-image-file')?.click()}
                       >
-                        <ImageIcon className="h-4 w-4" />
+                        {uploadingImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
                       </Button>
+                      <input
+                        id="category-image-file"
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = "";
+                          if (!file) return;
+                          setUploadingImage(true);
+                          try {
+                            const url = await uploadImage(file, "categories");
+                            setFormData((prev) => ({ ...prev, image_url: url }));
+                            toast.success("✅ Image uploadée sur Cloudinary");
+                          } catch (err: any) {
+                            toast.error("❌ Échec de l'upload", { description: err.message });
+                          } finally {
+                            setUploadingImage(false);
+                          }
+                        }}
+                      />
                     </div>
                   </div>
 

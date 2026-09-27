@@ -100,13 +100,14 @@ const AdminUsers = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [roles, setRoles] = useState<any[]>([]);
+  const [showDeleted, setShowDeleted] = useState(false);
 
   const ITEMS_PER_PAGE = 15;
 
   useEffect(() => {
     fetchUsers();
     fetchRoles();
-  }, []);
+  }, [showDeleted]);
 
   useEffect(() => {
     filterAndSortUsers();
@@ -117,7 +118,7 @@ const AdminUsers = () => {
     setLoading(true);
     try {
       const token = localStorage.getItem('sessionToken');
-      const resp = await apiFetch('/api/admin/users', {
+      const resp = await apiFetch(`/api/admin/users${showDeleted ? '?includeDeleted=true' : ''}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       if (!resp.ok) throw new Error('Erreur lors du chargement des utilisateurs');
@@ -214,9 +215,11 @@ const AdminUsers = () => {
 
     // Filtre par statut
     if (statusFilter === 'active') {
-      filtered = filtered.filter(user => user.is_active);
+      filtered = filtered.filter(user => user.is_active && user.status !== 'supprimé');
     } else if (statusFilter === 'inactive') {
-      filtered = filtered.filter(user => !user.is_active);
+      filtered = filtered.filter(user => !user.is_active && user.status !== 'supprimé');
+    } else if (statusFilter === 'supprime') {
+      filtered = filtered.filter(user => user.status === 'supprimé');
     }
 
     // Tri
@@ -292,6 +295,21 @@ const AdminUsers = () => {
     } finally {
       setDeleteDialogOpen(false);
       setUserToDelete(null);
+    }
+  };
+
+  const handleRestore = async (userId: string) => {
+    try {
+      const token = localStorage.getItem('sessionToken');
+      const resp = await apiFetch(`/api/admin/users/${userId}/restore`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!resp.ok) throw new Error('Erreur lors de la restauration');
+      toast.success('Utilisateur restauré avec succès');
+      fetchUsers();
+    } catch (err) {
+      toast.error('Impossible de restaurer cet utilisateur');
     }
   };
 
@@ -593,8 +611,19 @@ const AdminUsers = () => {
                   <SelectItem value="all">Tous les statuts</SelectItem>
                   <SelectItem value="active">Actifs uniquement</SelectItem>
                   <SelectItem value="inactive">Inactifs uniquement</SelectItem>
+                  <SelectItem value="supprime">Supprimés</SelectItem>
                 </SelectContent>
               </Select>
+              <Button
+                variant={showDeleted ? 'default' : 'outline'}
+                size="sm"
+                className="h-11 text-xs"
+                onClick={() => { setShowDeleted(v => !v); setStatusFilter('all'); }}
+                title="Inclure / masquer les comptes supprimés"
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                {showDeleted ? 'Masquer supprimés' : 'Voir supprimés'}
+              </Button>
 
               <Button 
                 variant="ghost" 
@@ -791,7 +820,12 @@ const AdminUsers = () => {
                         
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            {user.is_active ? (
+                            {user.status === 'supprimé' ? (
+                              <>
+                                <div className="w-2 h-2 rounded-full bg-gray-400" />
+                                <span className="text-sm font-medium text-gray-500">Supprimé</span>
+                              </>
+                            ) : user.is_active ? (
                               <>
                                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                                 <span className="text-sm font-medium text-green-700">Actif</span>
@@ -850,30 +884,39 @@ const AdminUsers = () => {
                                   <Users className="mr-2 h-4 w-4" />
                                   Définir comme employé
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleToggleStatus(user.id, user.is_active)}>
-                                  {user.is_active ? (
-                                    <>
-                                      <Lock className="mr-2 h-4 w-4" />
-                                      Désactiver
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Unlock className="mr-2 h-4 w-4" />
-                                      Activer
-                                    </>
-                                  )}
-                                </DropdownMenuItem>
+                                {user.status !== 'supprimé' && (
+                                  <DropdownMenuItem onClick={() => handleToggleStatus(user.id, user.is_active)}>
+                                    {user.is_active ? (
+                                      <>
+                                        <Lock className="mr-2 h-4 w-4" />
+                                        Désactiver
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Unlock className="mr-2 h-4 w-4" />
+                                        Activer
+                                      </>
+                                    )}
+                                  </DropdownMenuItem>
+                                )}
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem 
-                                  onClick={() => {
-                                    setUserToDelete(user);
-                                    setDeleteDialogOpen(true);
-                                  }}
-                                  className="text-destructive"
-                                >
-                                  <Trash2 className="mr-2 h-4 w-4" />
-                                  Supprimer
-                                </DropdownMenuItem>
+                                {user.status === 'supprimé' ? (
+                                  <DropdownMenuItem onClick={() => handleRestore(user.id)}>
+                                    <Unlock className="mr-2 h-4 w-4 text-green-600" />
+                                    Restaurer le compte
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setUserToDelete(user);
+                                      setDeleteDialogOpen(true);
+                                    }}
+                                    className="text-destructive"
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Supprimer
+                                  </DropdownMenuItem>
+                                )}
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </div>
@@ -970,7 +1013,7 @@ const AdminUsers = () => {
               
               <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                 <div className="text-sm text-red-700">
-                  ⚠️ Cette action supprimera définitivement le compte de l'utilisateur et toutes ses données associées.
+                  ⚠️ Le compte sera marqué comme <strong>supprimé</strong> (statut = supprimé). L'historique et les données seront conservés. Un administrateur peut restaurer le compte ultérieurement.
                 </div>
               </div>
             </div>

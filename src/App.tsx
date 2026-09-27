@@ -41,6 +41,10 @@ import Stock from "./pages/admin/Stock";
 import Reports from "./pages/admin/Reports";
 import ServicesPage from "./pages/admin/Services";
 import ServiceDetails from "./pages/admin/ServiceDetails";
+import DepensesPage from "./pages/admin/Depenses";
+import AgentIA from "./pages/admin/AgentIA";
+import WhatsAppNotifs from "./pages/admin/WhatsAppNotifs";
+import Invoices from "./pages/admin/Invoices";
 
 const queryClient = new QueryClient();
 
@@ -186,13 +190,17 @@ const App = () => (
               <Route path="stock" element={<Stock />} />
               <Route path="categories" element={<Categories />} />
               <Route path="orders" element={<Orders />} />
+              <Route path="invoices" element={<Invoices />} />
               <Route path="carts" element={<AbandonedCarts />} />
               <Route path="clients" element={<Clients />} />
               <Route path="clients/:id" element={<ClientDetail />} />
               <Route path="users" element={<AdminOnly><AdminUsers /></AdminOnly>} />
               <Route path="users/:id" element={<UserDetail />} />
               <Route path="roles" element={<Roles />} />
+              <Route path="depenses" element={<DepensesPage />} />
               <Route path="rapports" element={<Reports />} />
+              <Route path="agent-ia" element={<AdminOnly><AgentIA /></AdminOnly>} />
+              <Route path="whatsapp-notifs" element={<AdminOnly><WhatsAppNotifs /></AdminOnly>} />
               <Route path="testimonials" element={<Testimonials />} />
               <Route path="contact" element={<ContactInfo />} />
               <Route path="messages" element={<AdminOnly><Contacts /></AdminOnly>} />

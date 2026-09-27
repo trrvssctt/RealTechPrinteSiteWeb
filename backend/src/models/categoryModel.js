@@ -19,9 +19,37 @@ const updateCategory = async (id, { name, slug, description, parent_id, image_ur
   return rows[0];
 };
 
+// Supprime une catégorie. Refusée si des produits ACTIFS l'utilisent encore
+// (la base l'interdit : clé étrangère products.category_id). Les produits archivés
+// (supprimés) perdent simplement leur catégorie.
+// Retour : { deleted: true } | { notFound: true } | { blockedBy: [{ id, name }] }
 const deleteCategory = async (id) => {
-  await db.query('DELETE FROM app.categories WHERE id = $1', [id]);
-  return true;
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: cat } = await client.query('SELECT id FROM app.categories WHERE id = $1 FOR UPDATE', [id]);
+    if (!cat[0]) {
+      await client.query('ROLLBACK');
+      return { notFound: true };
+    }
+    const { rows: used } = await client.query(
+      'SELECT id, name FROM app.products WHERE category_id = $1 AND deleted_at IS NULL ORDER BY name',
+      [id]
+    );
+    if (used.length > 0) {
+      await client.query('ROLLBACK');
+      return { blockedBy: used };
+    }
+    await client.query('UPDATE app.products SET category_id = NULL WHERE category_id = $1 AND deleted_at IS NOT NULL', [id]);
+    await client.query('DELETE FROM app.categories WHERE id = $1', [id]);
+    await client.query('COMMIT');
+    return { deleted: true };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 module.exports = { listCategories, createCategory, updateCategory, deleteCategory };

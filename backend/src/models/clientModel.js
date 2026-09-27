@@ -23,13 +23,13 @@ async function createClient({ id = null, full_name, email, phone, created_by_cha
   if (id) {
     const res = await pool.query(
       `INSERT INTO app.clients (id, full_name, email, phone, created_by_channel, metadata, created_by_user) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [id, full_name, email, phone || null, created_by_channel || null, metadata, created_by_user]
+      [id, full_name, email || null, phone || null, created_by_channel || null, metadata, created_by_user]
     );
     return mapClientRow(res.rows[0]);
   }
   const res = await pool.query(
     `INSERT INTO app.clients (full_name, email, phone, created_by_channel, metadata, created_by_user) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-    [full_name, email, phone || null, created_by_channel || null, metadata, created_by_user]
+    [full_name, email || null, phone || null, created_by_channel || null, metadata, created_by_user]
   );
   return mapClientRow(res.rows[0]);
 }
@@ -40,11 +40,13 @@ async function getClientById(id) {
 }
 
 async function getClientByEmail(email) {
+  if (!email) return null;
   const res = await pool.query(`SELECT * FROM app.clients WHERE email = $1 LIMIT 1`, [email]);
   return mapClientRow(res.rows[0]);
 }
 
 async function getClientByPhone(phone) {
+  if (!phone) return null;
   const res = await pool.query(`SELECT * FROM app.clients WHERE phone = $1 LIMIT 1`, [phone]);
   return mapClientRow(res.rows[0]);
 }
@@ -54,11 +56,25 @@ async function listClients({ limit = 100, offset = 0 } = {}) {
   return res.rows.map(mapClientRow);
 }
 
-async function updateClient(id, { full_name, email, phone, created_by_channel, is_active, metadata, updated_by_user = null }) {
-  const res = await pool.query(
-    `UPDATE app.clients SET full_name = COALESCE($1, full_name), email = COALESCE($2, email), phone = COALESCE($3, phone), created_by_channel = COALESCE($4, created_by_channel), is_active = COALESCE($5, is_active), metadata = COALESCE($6, metadata), updated_by_user = COALESCE($7, updated_by_user), updated_at = now() WHERE id = $8 RETURNING *`,
-    [full_name, email, phone, created_by_channel, is_active, metadata, updated_by_user, id]
-  );
+async function updateClient(id, data) {
+  const fields = [];
+  const params = [];
+  let idx = 1;
+
+  const allowedFields = ['full_name', 'email', 'phone', 'created_by_channel', 'is_active', 'metadata', 'updated_by_user'];
+  
+  for (const field of allowedFields) {
+    if (Object.prototype.hasOwnProperty.call(data, field)) {
+      fields.push(`${field} = $${idx++}`);
+      params.push(data[field]);
+    }
+  }
+
+  if (fields.length === 0) return getClientById(id);
+
+  params.push(id);
+  const sql = `UPDATE app.clients SET ${fields.join(', ')}, updated_at = now() WHERE id = $${idx} RETURNING *`;
+  const res = await pool.query(sql, params);
   return mapClientRow(res.rows[0]);
 }
 

@@ -10,5 +10,7 @@ router.get('/', adminOrEmployeeAuth, stockController.list);
 
 // creating movements remains admin-only
 router.post('/', adminAuth, stockController.create);
+// plusieurs produits en une seule opération (tout ou rien)
+router.post('/batch', adminAuth, stockController.createBatch);
 
 module.exports = router;

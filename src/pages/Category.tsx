@@ -68,6 +68,7 @@ const Category = () => {
       image: p.image_url || (Array.isArray(p.images) && p.images[0]?.url) || '',
       category: getCategoryName(p.category) || category,
       description: p.short_description || p.description || '',
+      stock: p.stock ?? null,
     }));
   const info = categoryInfo[category as keyof typeof categoryInfo];
 

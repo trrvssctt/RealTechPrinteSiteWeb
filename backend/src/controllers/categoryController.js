@@ -42,7 +42,18 @@ const update = async (req, res, next) => {
 const destroy = async (req, res, next) => {
   try {
     const id = req.params.id;
-    await categoryModel.deleteCategory(id);
+    const result = await categoryModel.deleteCategory(id);
+    if (result.notFound) return res.status(404).json({ error: 'not found', message: 'Catégorie introuvable' });
+    if (result.blockedBy) {
+      const names = result.blockedBy.slice(0, 5).map(p => p.name).join(', ');
+      const more = result.blockedBy.length > 5 ? `, et ${result.blockedBy.length - 5} autre(s)` : '';
+      return res.status(409).json({
+        error: 'category_in_use',
+        message: `Impossible de supprimer : ${result.blockedBy.length} produit(s) utilisent encore cette catégorie (${names}${more}). Changez leur catégorie ou supprimez-les d'abord.`,
+        products: result.blockedBy,
+      });
+    }
+    try { require('../lib/cache').clear(); } catch (_) {}
     res.json({ ok: true });
   } catch (err) {
     next(err);

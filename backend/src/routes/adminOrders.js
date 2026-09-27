@@ -6,7 +6,10 @@ const ordersController = require('../controllers/ordersController');
 
 
 // allow employees and admins to GET the orders list, and allow employees to update as well
-router.get('/', adminOrEmployeeAuth, ordersController.listOrders);
+router.get('/',    adminOrEmployeeAuth, ordersController.listOrders);
+router.post('/',   adminOrEmployeeAuth, ordersController.createOrder);
 router.put('/:id', adminOrEmployeeAuth, ordersController.updateOrder);
+// Modifier les lignes d'une commande en attente
+router.put('/:id/items', adminOrEmployeeAuth, ordersController.updateOrderItems);
 
 module.exports = router;

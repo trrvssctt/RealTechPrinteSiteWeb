@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -47,6 +48,16 @@ import {
   Settings
 } from "lucide-react";
 import { ProductModal } from "@/components/admin/ProductModal";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 import { exportProductsToCSV, parseCSVFile } from "@/utils/csvUtils";
 import {
   DropdownMenu,
@@ -59,6 +70,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const Products = () => {
+  // Catalogue public (accueil, catégories) mis en cache par react-query sous ['products']
+  const queryClient = useQueryClient();
   const [products, setProducts] = useState<any[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -72,6 +85,9 @@ const Products = () => {
   const [loading, setLoading] = useState(true);
   const [bulkSelected, setBulkSelected] = useState<string[]>([]);
   const [isEmployee, setIsEmployee] = useState(false);
+  // Cible de suppression : un produit précis, ou 'bulk' pour la sélection multiple
+  const [deleteTarget, setDeleteTarget] = useState<{ mode: 'single'; product: any } | { mode: 'bulk' } | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortBy, setSortBy] = useState<string>("created_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
@@ -128,10 +144,13 @@ const Products = () => {
   const fetchProducts = async () => {
     setLoading(true);
     try {
-      const resp = await apiFetch('/api/products');
+      const resp = await apiFetch('/api/products/all');
       if (!resp.ok) throw new Error('Erreur chargement produits');
       const payload = await resp.json();
       setProducts(payload.data || []);
+      // Rechargé après chaque création / modification / suppression : le site public
+      // ne doit plus afficher l'ancienne liste
+      queryClient.invalidateQueries({ queryKey: ['products'] });
     } catch (err) {
       console.error('Fetch products error', err);
       toast.error('❌ Erreur lors du chargement des produits');
@@ -180,9 +199,9 @@ const Products = () => {
 
     // Status filter
     if (filterStatus === "active") {
-      filtered = filtered.filter(p => p.active);
+      filtered = filtered.filter(p => p.is_active);
     } else if (filterStatus === "inactive") {
-      filtered = filtered.filter(p => !p.active);
+      filtered = filtered.filter(p => !p.is_active);
     }
 
     // Sorting
@@ -269,7 +288,7 @@ const Products = () => {
       ...product,
       id: undefined,
       name: `${product.name} (Copie)`,
-      sku: product.sku ? `${product.sku}-COPY` : null,
+      sku: null, // régénéré automatiquement pour garantir l'unicité
       created_at: undefined,
       updated_at: undefined
     };
@@ -278,32 +297,55 @@ const Products = () => {
     setOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Êtes-vous sûr de vouloir supprimer ce produit ? Cette action est irréversible.")) return;
-    
+  // Exécute la suppression une fois confirmée dans le modal (simple ou groupée)
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     const token = localStorage.getItem('sessionToken');
+
     try {
-      const resp = await fetch(`/api/products/${id}`, { 
-        method: 'DELETE', 
-        headers: { Authorization: `Bearer ${token}` } 
-      });
-      
-      if (!resp.ok) throw new Error('Erreur lors de la suppression');
-      
-      toast.success('🗑️ Produit supprimé', {
-        description: 'Le produit a été supprimé avec succès'
-      });
-      
+      if (deleteTarget.mode === 'single') {
+        const resp = await apiFetch(`/api/products/${deleteTarget.product.id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!resp.ok) throw new Error('Erreur lors de la suppression');
+        toast.success('🗑️ Produit archivé', {
+          description: `« ${deleteTarget.product.name} » a été retiré du catalogue.`
+        });
+      } else {
+        // Suppression groupée
+        let successCount = 0;
+        let errorCount = 0;
+        for (const id of bulkSelected) {
+          try {
+            const resp = await apiFetch(`/api/products/${id}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            if (resp.ok) successCount++; else errorCount++;
+          } catch {
+            errorCount++;
+          }
+        }
+        toast.success('🗑️ Produits archivés', {
+          description: `${successCount} produit(s) retiré(s)${errorCount ? `, ${errorCount} échec(s)` : ''}.`
+        });
+        setBulkSelected([]);
+      }
       fetchProducts();
     } catch (err) {
       console.error('Delete product error', err);
       toast.error('❌ Erreur lors de la suppression', {
         description: (err as Error).message || 'Impossible de supprimer le produit'
       });
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
     }
   };
 
-  const handleBulkAction = async (action: 'delete' | 'toggle_active' | 'toggle_featured') => {
+  const handleBulkAction = async (action: 'toggle_active' | 'toggle_featured') => {
     if (bulkSelected.length === 0) {
       toast.warning("Aucun produit sélectionné");
       return;
@@ -316,22 +358,15 @@ const Products = () => {
     for (const id of bulkSelected) {
       try {
         let resp;
-        
+
         switch (action) {
-          case 'delete':
-            resp = await fetch(`/api/products/${id}`, { 
-              method: 'DELETE', 
-              headers: { Authorization: `Bearer ${token}` } 
-            });
-            break;
-          
           case 'toggle_active':
             const product = products.find(p => p.id === id);
             if (product) {
               resp = await apiFetch(`/api/products/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ active: !product.active })
+                body: JSON.stringify({ is_active: !product.is_active })
               });
             }
             break;
@@ -427,7 +462,7 @@ const Products = () => {
 
   const stats = useMemo(() => {
     const total = products.length;
-    const active = products.filter(p => p.active).length;
+    const active = products.filter(p => p.is_active).length;
     const featured = products.filter(p => p.featured).length;
     const lowStock = products.filter(p => p.stock <= p.threshold && p.stock > 0).length;
     const outOfStock = products.filter(p => !p.in_stock || p.stock === 0).length;
@@ -632,7 +667,7 @@ const Products = () => {
                 <SelectContent>
                   <SelectItem value="all">Toutes les catégories</SelectItem>
                   {categories.map((cat) => (
-                    <SelectItem key={cat.id} value={cat.id}>
+                    <SelectItem key={cat.id} value={String(cat.id)}>
                       {cat.name}
                     </SelectItem>
                   ))}
@@ -762,12 +797,12 @@ const Products = () => {
                       Basculer vedette
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem 
-                      onClick={() => handleBulkAction('delete')}
+                    <DropdownMenuItem
+                      onClick={() => setDeleteTarget({ mode: 'bulk' })}
                       className="text-destructive"
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
-                      Supprimer
+                      Supprimer ({bulkSelected.length})
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -948,7 +983,7 @@ const Products = () => {
                               <div className="text-xs text-muted-foreground line-clamp-1">
                                 {product.description?.substring(0, 60)}...
                               </div>
-                              {!product.active && (
+                              {!product.is_active && (
                                 <Badge variant="outline" className="mt-1 text-xs">
                                   Inactif
                                 </Badge>
@@ -1043,8 +1078,8 @@ const Products = () => {
                                       Voir sur le site
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
-                                    <DropdownMenuItem 
-                                      onClick={() => handleDelete(product.id)}
+                                    <DropdownMenuItem
+                                      onClick={() => setDeleteTarget({ mode: 'single', product })}
                                       className="text-destructive"
                                     >
                                       <Trash2 className="mr-2 h-4 w-4" />
@@ -1130,6 +1165,48 @@ const Products = () => {
         categories={categories}
         onSave={handleSave}
       />
+
+      {/* Confirmation de suppression (produit unique ou sélection groupée) */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o && !deleting) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
+              <Trash2 className="h-6 w-6 text-destructive" />
+            </div>
+            <AlertDialogTitle className="text-center">
+              {deleteTarget?.mode === 'bulk'
+                ? `Supprimer ${bulkSelected.length} produit${bulkSelected.length > 1 ? 's' : ''} ?`
+                : 'Supprimer ce produit ?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-center">
+              {deleteTarget?.mode === 'single' && (
+                <span className="mb-2 block font-medium text-foreground">
+                  « {deleteTarget.product?.name} »
+                </span>
+              )}
+              {deleteTarget?.mode === 'bulk'
+                ? 'Les produits sélectionnés seront retirés du catalogue et disparaîtront de cette liste ainsi que de la boutique en ligne.'
+                : 'Le produit sera retiré du catalogue et disparaîtra de cette liste ainsi que de la boutique en ligne.'}
+              {' '}
+              Les commandes et factures déjà enregistrées le conservent. Pour seulement le masquer du site sans le retirer, désactivez plutôt «&nbsp;Afficher sur le site&nbsp;».
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); confirmDelete(); }}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Suppression...</>
+              ) : (
+                <><Trash2 className="mr-2 h-4 w-4" /> Supprimer</>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

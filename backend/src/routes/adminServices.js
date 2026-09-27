@@ -6,6 +6,7 @@ const servicesController = require('../controllers/servicesController');
 
 // allow admins and employees to list and view services
 router.get('/', adminOrEmployeeAuth, servicesController.list);
+router.get('/:id/stats', adminOrEmployeeAuth, servicesController.stats);
 router.get('/:id', adminOrEmployeeAuth, servicesController.getOne);
 
 // create/update/delete remain admin-only

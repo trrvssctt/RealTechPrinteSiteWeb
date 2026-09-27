@@ -22,7 +22,8 @@ const create = async (req, res, next) => {
 
     const downloadUrl = result.filename ? `/api/admin/rapports/download/${result.filename}` : null;
 
-    res.status(201).json({ data: result.report, download: downloadUrl });
+    // PDF : les données sont renvoyées pour la mise en page côté navigateur
+    res.status(201).json({ data: result.report, download: downloadUrl, report_data: result.data || undefined });
   } catch (err) {
     next(err);
   }
@@ -39,4 +40,15 @@ const download = async (req, res, next) => {
   }
 };
 
-module.exports = { list, create, download };
+// GET /api/admin/rapports/:id/data — données d'un rapport archivé (PDF régénéré)
+const data = async (req, res, next) => {
+  try {
+    const result = await rapportModel.getRapportData(req.params.id);
+    if (!result) return res.status(404).json({ error: 'not_found' });
+    res.json({ data: result.report, report_data: result.data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { list, create, download, data };

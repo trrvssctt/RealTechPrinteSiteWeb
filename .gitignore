@@ -1,0 +1,20 @@
+# Secrets et scripts contenant des identifiants — ne jamais pousser (dépôt public)
+.env
+.env.local
+backend/.env.local
+setup_env_cmd.txt
+mise_a_jour.sh
+identifiant_mail.txt
+
+# Fichiers générés
+dist/
+backend/exports/
+*.log
+backend/backend.pid
+
+# Captures et documents de travail
+assets/*.jpg
+assets/*.jpeg
+assets/capture_*.png
+assets/*.pdf
+Capture d*.png

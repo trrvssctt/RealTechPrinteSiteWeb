@@ -19,6 +19,8 @@ import {
   AlertDialogHeader, AlertDialogTitle 
 } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import { 
@@ -26,7 +28,7 @@ import {
   Users, Tag, CheckCircle, XCircle, Star, Shield,
   BarChart3, Settings, Zap, FileText, Activity,
   Share2, Copy, Download, Printer, Mail,
-  MoreVertical, TrendingUp, Eye
+  MoreVertical, TrendingUp, Eye, ShoppingCart
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -37,17 +39,44 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
+interface ServiceStats {
+  totalOrders: number;
+  totalQty: number;
+  revenue: number;
+  revenueCompleted: number;
+  avgUnitPrice: number;
+  margin: number | null;
+  distinctClients: number;
+  completionRate: number;
+  cancelledOrders: number;
+  firstSaleAt: string | null;
+  lastSaleAt: string | null;
+  monthly: Array<{ month: string; qty: number; revenue: number; orders: number }>;
+  topClients: Array<{ client_id: string | null; name: string; qty: number; revenue: number }>;
+  lines: Array<{ order_id: string; placed_at: string; status: string; client_id: string | null; client_name: string | null; quantity: number; unit_price: number; total: number }>;
+}
+
+const ORDER_STATUS: Record<string, { label: string; className: string }> = {
+  pending: { label: 'En attente', className: 'bg-amber-50 text-amber-700 border-amber-200' },
+  in_progress: { label: 'En cours', className: 'bg-blue-50 text-blue-700 border-blue-200' },
+  completed: { label: 'Terminée', className: 'bg-green-50 text-green-700 border-green-200' },
+  cancelled: { label: 'Annulée', className: 'bg-gray-100 text-gray-500 border-gray-200' },
+};
+
+const MONTHS_FR = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+const monthLabel = (ym: string) => {
+  const [y, m] = ym.split('-').map(Number);
+  return `${MONTHS_FR[m - 1]} ${String(y).slice(2)}`;
+};
+
 const ServiceDetailsImproved = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [service, setService] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
-  const [stats, setStats] = useState({
-    totalBookings: 0,
-    revenue: 0,
-    avgRating: 0,
-    completionRate: 0
-  });
+  // Statistiques réelles, calculées côté serveur à partir des commandes contenant ce service
+  const [stats, setStats] = useState<ServiceStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [openEditDialog, setOpenEditDialog] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
@@ -84,40 +113,18 @@ const ServiceDetailsImproved = () => {
   };
 
   const fetchServiceStats = async (serviceId: string) => {
+    setStatsLoading(true);
     try {
-      // try server-side stats endpoint first
       const resp = await apiFetch(`/api/admin/services/${serviceId}/stats`);
-      if (resp.ok) {
-        const body = await resp.json().catch(() => ({}));
-        const s = body.data || body.stats || body || {};
-        // normalize numeric fields
-        const normalized = {
-          totalBookings: Number(s.totalBookings) || Number(s.total_bookings) || 0,
-          revenue: Number(s.revenue) || Number(s.revenu) || 0,
-          avgRating: Number(s.avgRating) || Number(s.avg_rating) || Number(s.avg) || 0,
-          completionRate: Number(s.completionRate) || Number(s.completion_rate) || 0
-        };
-        setStats(normalized);
-        return;
-      }
-
-      // fallback: simulate stats if server endpoint not available
-      const mockStats = {
-        totalBookings: Math.floor(Math.random() * 100),
-        revenue: Math.floor(Math.random() * 5000),
-        avgRating: Number((Math.random() * 2 + 3).toFixed(1)),
-        completionRate: Math.floor(Math.random() * 30 + 70)
-      };
-      setStats(mockStats);
+      if (!resp.ok) throw new Error(`Erreur ${resp.status}`);
+      const body = await resp.json();
+      setStats(body.data || null);
     } catch (e) {
       console.error('Erreur chargement stats:', e);
-      const mockStats = {
-        totalBookings: Math.floor(Math.random() * 100),
-        revenue: Math.floor(Math.random() * 5000),
-        avgRating: Number((Math.random() * 2 + 3).toFixed(1)),
-        completionRate: Math.floor(Math.random() * 30 + 70)
-      };
-      setStats(mockStats);
+      setStats(null);
+      toast.error('Statistiques du service indisponibles');
+    } finally {
+      setStatsLoading(false);
     }
   };
 
@@ -160,6 +167,14 @@ const ServiceDetailsImproved = () => {
     }
   };
 
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('fr-FR', {
+      style: 'currency',
+      currency: 'XOF',
+      minimumFractionDigits: 0
+    }).format(amount).replace('XOF', 'F CFA');
+  };
+
   const formatDuration = (minutes: number) => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
@@ -168,14 +183,6 @@ const ServiceDetailsImproved = () => {
       return `${hours}h${mins > 0 ? ` ${mins}min` : ''}`;
     }
     return `${mins}min`;
-  };
-
-  const formatPrice = (price: number) => {
-    const formatted = new Intl.NumberFormat('fr-FR', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2
-    }).format(price || 0);
-    return `${formatted} F CFA`;
   };
 
   const getCategoryInfo = (category: string) => {
@@ -192,7 +199,7 @@ const ServiceDetailsImproved = () => {
     const details = `
 Service: ${service?.name}
 Description: ${service?.description || 'Non renseignée'}
-Prix: ${formatPrice(service?.price || 0)}
+Prix: ${formatCurrency(service?.price || 0)}
 Durée: ${formatDuration(service?.duration_minutes || 0)}
 Catégorie: ${getCategoryInfo(service?.category || 'general').label}
 Statut: ${service?.is_active ? 'Actif' : 'Inactif'}
@@ -353,78 +360,77 @@ Identifiant: ${service?.id}
         </div>
       </div>
 
-      {/* Quick Stats */}
+      {/* Quick Stats — données réelles (commandes contenant ce service) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Réservations</p>
-                <h3 className="text-2xl font-bold mt-2">{stats.totalBookings}</h3>
+                <p className="text-sm font-medium text-gray-600">Commandes</p>
+                {statsLoading
+                  ? <Skeleton className="h-8 w-24 mt-2" />
+                  : <h3 className="text-2xl font-bold mt-2">{stats ? stats.totalOrders : '—'}</h3>}
               </div>
               <div className="p-3 bg-blue-50 rounded-full">
-                <Calendar className="h-6 w-6 text-blue-600" />
+                <ShoppingCart className="h-6 w-6 text-blue-600" />
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">Total réalisées</p>
+            <p className="text-xs text-gray-500 mt-2">{stats ? `${stats.totalQty} unité(s) vendue(s)` : 'Commandes non annulées'}</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Revenu généré</p>
-                <h3 className="text-2xl font-bold mt-2 text-green-600">
-                  {formatPrice(stats.revenue)}
-                </h3>
+                <p className="text-sm font-medium text-gray-600">Chiffre d'affaires</p>
+                {statsLoading
+                  ? <Skeleton className="h-8 w-24 mt-2" />
+                  : <h3 className="text-2xl font-bold mt-2">{stats ? formatCurrency(stats.revenue) : '—'}</h3>}
               </div>
               <div className="p-3 bg-green-50 rounded-full">
                 <TrendingUp className="h-6 w-6 text-green-600" />
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">Chiffre total</p>
+            <p className="text-xs text-gray-500 mt-2">{stats ? `dont ${formatCurrency(stats.revenueCompleted)} sur commandes terminées` : 'Hors commandes annulées'}</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Note moyenne</p>
-                <h3 className="text-2xl font-bold mt-2 text-yellow-600">
-                  {stats.avgRating}/5
-                </h3>
+                <p className="text-sm font-medium text-gray-600">Clients</p>
+                {statsLoading
+                  ? <Skeleton className="h-8 w-24 mt-2" />
+                  : <h3 className="text-2xl font-bold mt-2">{stats ? stats.distinctClients : '—'}</h3>}
               </div>
-              <div className="p-3 bg-yellow-50 rounded-full">
-                <Star className="h-6 w-6 text-yellow-600" />
+              <div className="p-3 bg-indigo-50 rounded-full">
+                <Users className="h-6 w-6 text-indigo-600" />
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">Satisfaction client</p>
+            <p className="text-xs text-gray-500 mt-2">{stats && stats.totalQty > 0 ? `Prix moyen pratiqué : ${formatCurrency(stats.avgUnitPrice)}` : 'Clients distincts'}</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600">Taux de complétion</p>
-                <h3 className="text-2xl font-bold mt-2 text-purple-600">
-                  {stats.completionRate}%
-                </h3>
+                {statsLoading
+                  ? <Skeleton className="h-8 w-24 mt-2" />
+                  : <h3 className="text-2xl font-bold mt-2">{stats ? `${stats.completionRate}%` : '—'}</h3>}
               </div>
               <div className="p-3 bg-purple-50 rounded-full">
                 <Activity className="h-6 w-6 text-purple-600" />
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">Services terminés</p>
+            <p className="text-xs text-gray-500 mt-2">{stats ? `${stats.cancelledOrders} commande(s) annulée(s)` : 'Commandes terminées'}</p>
           </CardContent>
         </Card>
       </div>
 
       {/* Main Content Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full md:w-auto grid-cols-3 md:grid-cols-5">
+        <TabsList className="grid w-full md:w-auto grid-cols-2 md:grid-cols-4">
           <TabsTrigger value="overview" className="data-[state=active]:bg-blue-50">
             Vue d'ensemble
           </TabsTrigger>
@@ -435,10 +441,7 @@ Identifiant: ${service?.id}
             Statistiques
           </TabsTrigger>
           <TabsTrigger value="bookings" className="data-[state=active]:bg-blue-50">
-            Réservations
-          </TabsTrigger>
-          <TabsTrigger value="settings" className="data-[state=active]:bg-blue-50">
-            Paramètres
+            Commandes
           </TabsTrigger>
         </TabsList>
 
@@ -463,7 +466,7 @@ Identifiant: ${service?.id}
                     <div className="flex items-center gap-2">
                       <DollarSign className="h-5 w-5 text-green-600" />
                       <span className="text-2xl font-bold">
-                        {formatPrice(service.price || 0)}
+                        {formatCurrency(service.price || 0)}
                       </span>
                     </div>
                   </div>
@@ -604,83 +607,151 @@ Identifiant: ${service?.id}
           </div>
         </TabsContent>
 
-        {/* Details Tab */}
+        {/* Details Tab — tarification et marge */}
         <TabsContent value="details">
           <Card>
             <CardHeader>
-              <CardTitle>Configuration détaillée</CardTitle>
-              <CardDescription>
-                Tous les paramètres et configurations du service
-              </CardDescription>
+              <CardTitle>Tarification</CardTitle>
+              <CardDescription>Prix catalogue, prix d'achat et prix réellement pratiqués</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-6">
-                {/* Ajouter ici les configurations détaillées */}
-                <div className="text-center py-8 text-gray-500">
-                  <Settings className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                  <p>Configurations détaillées à venir...</p>
-                </div>
-              </div>
+              {(() => {
+                const price = Number(service.price || 0);
+                const cost = Number(service.purchase_price || 0);
+                const rows: Array<[string, React.ReactNode]> = [
+                  ['Prix de vente (catalogue)', formatCurrency(price)],
+                  ["Prix d'achat", cost > 0 ? formatCurrency(cost) : <span className="text-gray-400">Non renseigné</span>],
+                  ['Marge unitaire (catalogue)', cost > 0 && price > 0
+                    ? `${formatCurrency(price - cost)} (${Math.round(((price - cost) / price) * 100)}%)`
+                    : <span className="text-gray-400">—</span>],
+                  ['Prix moyen réellement pratiqué', stats && stats.totalQty > 0 ? formatCurrency(stats.avgUnitPrice) : <span className="text-gray-400">Aucune vente</span>],
+                  ['Marge réalisée', stats?.margin != null ? formatCurrency(stats.margin) : <span className="text-gray-400">Prix d'achat inconnu sur les ventes</span>],
+                  ['Première vente', stats?.firstSaleAt ? new Date(stats.firstSaleAt).toLocaleDateString('fr-FR') : '—'],
+                  ['Dernière vente', stats?.lastSaleAt ? new Date(stats.lastSaleAt).toLocaleDateString('fr-FR') : '—'],
+                ];
+                return (
+                  <div className="divide-y">
+                    {rows.map(([label, value]) => (
+                      <div key={label} className="flex items-center justify-between py-3 text-sm">
+                        <span className="text-gray-600">{label}</span>
+                        <span className="font-medium text-right">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* Statistics Tab */}
-        <TabsContent value="statistics">
+        {/* Statistics Tab — 12 derniers mois */}
+        <TabsContent value="statistics" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Analyse des performances</CardTitle>
-              <CardDescription>
-                Statistiques et tendances du service
-              </CardDescription>
+              <CardTitle>Chiffre d'affaires mensuel</CardTitle>
+              <CardDescription>12 derniers mois, hors commandes annulées</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-6">
-                <div className="text-center py-8 text-gray-500">
-                  <BarChart3 className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                  <p>Graphiques de performance à venir...</p>
+              {statsLoading ? <Skeleton className="h-64 w-full" /> : !stats || stats.totalQty === 0 ? (
+                <p className="text-center py-10 text-sm text-gray-500">Ce service n'a pas encore été vendu.</p>
+              ) : (
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={stats.monthly.map(m => ({ ...m, label: monthLabel(m.month) }))} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+                      <CartesianGrid vertical={false} stroke="#e5e7eb" />
+                      <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6b7280' }} />
+                      <YAxis tickLine={false} axisLine={false} width={70} tick={{ fontSize: 11, fill: '#6b7280' }}
+                        tickFormatter={(v) => new Intl.NumberFormat('fr-FR', { notation: 'compact' }).format(v)} />
+                      <Tooltip
+                        cursor={{ fill: 'rgba(59,130,246,0.08)' }}
+                        formatter={(value: any, _name: any, item: any) => [
+                          `${formatCurrency(Number(value))} · ${item?.payload?.qty ?? 0} unité(s)`, "Chiffre d'affaires",
+                        ]}
+                        labelStyle={{ color: '#111827', fontWeight: 600 }}
+                      />
+                      <Bar dataKey="revenue" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={32} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
-              </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Meilleurs clients</CardTitle>
+              <CardDescription>Par chiffre d'affaires sur ce service</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!stats || stats.topClients.length === 0 ? (
+                <p className="text-center py-6 text-sm text-gray-500">Aucun client pour l'instant.</p>
+              ) : (
+                <div className="divide-y">
+                  {stats.topClients.map((c, i) => (
+                    <div key={c.client_id || c.name} className="flex items-center justify-between py-2.5 text-sm">
+                      <span className="flex items-center gap-2">
+                        <span className="w-5 text-gray-400">{i + 1}.</span>
+                        {c.client_id
+                          ? <button className="font-medium text-blue-700 hover:underline" onClick={() => navigate(`/admin/clients/${c.client_id}`)}>{c.name}</button>
+                          : <span className="font-medium">{c.name}</span>}
+                        <span className="text-gray-400">· {c.qty} unité(s)</span>
+                      </span>
+                      <span className="font-semibold">{formatCurrency(c.revenue)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* Bookings Tab */}
+        {/* Commandes contenant ce service */}
         <TabsContent value="bookings">
           <Card>
             <CardHeader>
-              <CardTitle>Historique des réservations</CardTitle>
-              <CardDescription>
-                Liste complète des réservations pour ce service
-              </CardDescription>
+              <CardTitle>Commandes</CardTitle>
+              <CardDescription>Toutes les commandes contenant ce service (200 plus récentes)</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                <div className="text-center py-8 text-gray-500">
-                  <Calendar className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                  <p>Historique des réservations à venir...</p>
+            <CardContent className="p-0">
+              {statsLoading ? <div className="p-6"><Skeleton className="h-40 w-full" /></div> : !stats || stats.lines.length === 0 ? (
+                <p className="text-center py-10 text-sm text-gray-500">Aucune commande ne contient ce service.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Commande</TableHead>
+                        <TableHead>Client</TableHead>
+                        <TableHead className="text-right">Qté</TableHead>
+                        <TableHead className="text-right">Prix unitaire</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
+                        <TableHead>Statut</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {stats.lines.map((l, i) => {
+                        const st = ORDER_STATUS[l.status] || { label: l.status, className: 'bg-gray-50 text-gray-600 border-gray-200' };
+                        return (
+                          <TableRow key={`${l.order_id}-${i}`} className={l.status === 'cancelled' ? 'opacity-60' : ''}>
+                            <TableCell className="whitespace-nowrap">{new Date(l.placed_at).toLocaleDateString('fr-FR')}</TableCell>
+                            <TableCell className="font-mono text-xs">CMD-{l.order_id.slice(0, 8).toUpperCase()}</TableCell>
+                            <TableCell>
+                              {l.client_id
+                                ? <button className="text-blue-700 hover:underline" onClick={() => navigate(`/admin/clients/${l.client_id}`)}>{l.client_name || 'Client'}</button>
+                                : (l.client_name || '—')}
+                            </TableCell>
+                            <TableCell className="text-right">{l.quantity}</TableCell>
+                            <TableCell className="text-right whitespace-nowrap">{formatCurrency(l.unit_price)}</TableCell>
+                            <TableCell className="text-right whitespace-nowrap font-medium">{formatCurrency(l.total)}</TableCell>
+                            <TableCell><Badge variant="outline" className={st.className}>{st.label}</Badge></TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Settings Tab */}
-        <TabsContent value="settings">
-          <Card>
-            <CardHeader>
-              <CardTitle>Paramètres avancés</CardTitle>
-              <CardDescription>
-                Options de configuration avancées
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                <div className="text-center py-8 text-gray-500">
-                  <Settings className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                  <p>Paramètres avancés à venir...</p>
-                </div>
-              </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
