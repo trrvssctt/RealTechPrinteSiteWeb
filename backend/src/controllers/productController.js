@@ -35,6 +35,8 @@ const listAll = async (req, res, next) => {
     const rows = await productModel.listProducts({
       limit, offset, includeImages: true, includeInactive: true, fullFields: true,
     });
+    // Le prix d'achat reste réservé aux admins
+    if (!req.user?.roles?.includes('admin')) rows.forEach(r => { delete r.purchase_price; });
     res.json({ data: rows });
   } catch (err) {
     next(err);
