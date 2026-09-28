@@ -80,7 +80,7 @@ import {
   Package
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { fr } from 'date-fns/locale';
 import {
   DropdownMenu,
@@ -92,6 +92,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const Clients = () => {
+  const navigate = useNavigate();
   const [clients, setClients] = useState<any[]>([]);
   const [filteredClients, setFilteredClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -970,7 +971,7 @@ const Clients = () => {
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
                                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                <DropdownMenuItem onClick={() => toast.info("Modifier le client")}>
+                                <DropdownMenuItem onClick={() => navigate(`/admin/clients/${client.id}?edit=1`)}>
                                   <Edit className="mr-2 h-4 w-4" />
                                   Modifier
                                 </DropdownMenuItem>

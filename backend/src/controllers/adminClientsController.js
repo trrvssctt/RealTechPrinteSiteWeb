@@ -91,10 +91,25 @@ const createClient = async (req, res, next) => {
 const updateClient = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const payload = req.body || {};
+    const payload = { ...(req.body || {}) };
+    // Activer / désactiver un client reste réservé aux admins
+    if (!req.user?.roles?.includes('admin')) delete payload.is_active;
+    for (const f of ['email', 'phone']) {
+      if (typeof payload[f] === 'string') payload[f] = payload[f].trim() || null;
+    }
+    if ('full_name' in payload && !String(payload.full_name || '').trim()) {
+      return res.status(400).json({ error: 'Le nom du client est obligatoire.' });
+    }
     // attach updater id when available
     payload.updated_by_user = req.user?.id || null;
-    const client = await clientModel.updateClient(id, payload);
+    let client;
+    try {
+      client = await clientModel.updateClient(id, payload);
+    } catch (err) {
+      if (err.code === '23505') return res.status(409).json({ error: 'Cet email est déjà utilisé par un autre client.' });
+      throw err;
+    }
+    if (!client) return res.status(404).json({ error: 'Client introuvable.' });
     res.json({ client });
     setImmediate(() => n8n.notifyClientUpdated(client, req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (err) {

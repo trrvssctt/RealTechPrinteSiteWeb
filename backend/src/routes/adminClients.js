@@ -14,8 +14,10 @@ router.post('/',         adminOrEmployeeAuth, adminClientsController.createClien
 router.get('/:id/stats', adminOrEmployeeAuth, adminClientsController.getClientStats);
 router.get('/:id',       adminOrEmployeeAuth, adminClientsController.getClient);
 
-// Update/delete/stats globales — admin uniquement
-router.put('/:id',    adminAuth, requireRole('admin'), adminClientsController.updateClient);
+// Modification des coordonnées — admins et employés (activation réservée aux admins, cf. contrôleur)
+router.put('/:id',    adminOrEmployeeAuth, adminClientsController.updateClient);
+
+// Delete/stats globales — admin uniquement
 router.delete('/:id', adminAuth, requireRole('admin'), adminClientsController.deleteClient);
 router.get('/stats',  adminAuth, requireRole('admin'), adminClientsController.stats);
 

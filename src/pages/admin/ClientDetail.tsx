@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -61,6 +61,7 @@ const GOOD_RANK = 10;            // top 10 = bon client
 const ClientDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [data, setData]       = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -96,11 +97,6 @@ const ClientDetail = () => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const body = await r.json();
       setData(body);
-      setEditForm({
-        full_name: body.client?.full_name || '',
-        email:     body.client?.email     || '',
-        phone:     body.client?.phone     || '',
-      });
     } catch {
       if (showSpinner) toast.error('Impossible de charger les données client');
     } finally {
@@ -118,6 +114,22 @@ const ClientDetail = () => {
 
   // ─── Actions ─────────────────────────────────────────────────────────────
 
+  // Le formulaire est rempli à l'ouverture (et non à chaque rafraîchissement
+  // automatique, qui écraserait la saisie en cours).
+  const openEdit = useCallback(() => {
+    const c = data?.client;
+    setEditForm({ full_name: c?.full_name || '', email: c?.email || '', phone: c?.phone || '' });
+    setEditOpen(true);
+  }, [data?.client]);
+
+  // Ouverture directe depuis le bouton « Modifier » de la liste des clients
+  useEffect(() => {
+    if (searchParams.get('edit') === '1' && data?.client) {
+      openEdit();
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, data?.client, openEdit, setSearchParams]);
+
   const handleEdit = async () => {
     try {
       const payload = {
@@ -131,12 +143,15 @@ const ClientDetail = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!r.ok) throw new Error();
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${r.status}`);
+      }
       toast.success('Client mis à jour');
       setEditOpen(false);
       fetchData(true);
-    } catch {
-      toast.error('Erreur lors de la mise à jour');
+    } catch (e: any) {
+      toast.error('Erreur lors de la mise à jour', { description: e?.message });
     }
   };
 
@@ -213,7 +228,7 @@ const ClientDetail = () => {
           <Button variant="outline" size="sm" onClick={() => fetchData(true)} disabled={refreshing}>
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+          <Button variant="outline" size="sm" onClick={openEdit}>
             <Edit className="w-4 h-4 mr-1.5" />Modifier
           </Button>
           <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50"
