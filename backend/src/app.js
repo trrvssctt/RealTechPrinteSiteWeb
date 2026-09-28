@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -48,13 +49,29 @@ app.use(helmet({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
+// Derrière nginx : sans ça, req.ip vaut 127.0.0.1 pour tout le monde et
+// tous les visiteurs/employés partagent le même compteur de rate limit.
+app.set('trust proxy', 1);
+
 // ── Rate limiting global (toutes les routes API) ─────────────────────────────
+// Utilisateur connecté : compteur par session (un bureau derrière une même box
+// ne se bloque pas mutuellement). Visiteur anonyme : compteur par IP.
+const bearerToken = (req) => {
+  const auth = req.headers.authorization || '';
+  return auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+};
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 300,
+  max: (req) => (bearerToken(req) ? 3000 : 600),
+  keyGenerator: (req) => {
+    const token = bearerToken(req);
+    return token
+      ? 'sess:' + crypto.createHash('sha256').update(token).digest('hex')
+      : 'ip:' + req.ip;
+  },
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Trop de requêtes, réessayez dans 15 minutes.' },
+  message: { error: 'Trop de requêtes, réessayez dans quelques minutes.' },
   skip: (req) => process.env.NODE_ENV !== 'production' && (req.ip === '127.0.0.1' || req.ip === '::1'),
 });
 app.use('/api/', globalLimiter);

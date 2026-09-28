@@ -112,7 +112,7 @@ const ClientDetail = () => {
   useEffect(() => {
     setLoading(true);
     fetchData();
-    intervalRef.current = setInterval(() => fetchData(false), 30000);
+    intervalRef.current = setInterval(() => { if (!document.hidden) fetchData(false); }, 30000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [fetchData]);
 

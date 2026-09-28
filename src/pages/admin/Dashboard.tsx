@@ -94,7 +94,7 @@ const Dashboard = () => {
     };
 
     checkContacts();
-    const id = setInterval(() => { if (!stopped) checkContacts(); }, 30000);
+    const id = setInterval(() => { if (!stopped && !document.hidden) checkContacts(); }, 30000);
     return () => { stopped = true; clearInterval(id); };
   }, []);
 

@@ -85,7 +85,7 @@ const AdminLayout = ({ children }: { children?: any }) => {
     };
     fetchMe();
     fetchStats();
-    const interval = setInterval(fetchStats, 30000);
+    const interval = setInterval(() => { if (!document.hidden) fetchStats(); }, 30000);
     return () => { mounted = false; clearInterval(interval); };
   }, []);
   const location = useLocation();

@@ -94,7 +94,7 @@ const UserDetail = () => {
     setLoading(true);
     fetchActivity();
     // Rafraîchissement automatique toutes les 15 s
-    intervalRef.current = setInterval(() => fetchActivity(false), 15000);
+    intervalRef.current = setInterval(() => { if (!document.hidden) fetchActivity(false); }, 15000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [fetchActivity]);
 
