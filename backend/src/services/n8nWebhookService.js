@@ -332,7 +332,7 @@ async function notifyDepenseCreated(depense, actor) {
     `🗂️ Catégorie : ${depense.categorie || '—'}`,
     `💰 Montant : ${montant} FCFA`,
     `👤 Par : ${acteur}`,
-    `📋 Statut : En attente de validation`,
+    `📋 Statut : Validée`,
     ``,
     `🕐 ${new Date().toLocaleString('fr-FR', { timeZone: 'Africa/Dakar' })}`,
   ].join('\n');

@@ -3,7 +3,8 @@
  *
  * Règles anti-fraude :
  * - Employé : peut seulement CRÉER une dépense (lecture seule ensuite)
- * - Admin : peut VALIDER, REJETER ou ANNULER ; jamais de suppression définitive
+ * - Toute dépense créée est validée automatiquement (validated_by = créateur)
+ * - Admin : peut ANNULER ; jamais de suppression définitive
  * - Chaque dépense est horodatée et liée à son créateur (immuable)
  */
 
@@ -92,7 +93,7 @@ const list = async (req, res, next) => {
   }
 };
 
-// ─── Créer une dépense (employé ou admin) ─────────────────────────────────────
+// ─── Créer une dépense (employé ou admin) — validée automatiquement ──────────
 const create = async (req, res, next) => {
   try {
     const { description, montant, categorie, justification } = req.body || {};
@@ -111,8 +112,8 @@ const create = async (req, res, next) => {
     const userId = req.user && req.user.id ? req.user.id : null;
 
     const { rows } = await pool.query(
-      `INSERT INTO app.depenses (description, montant, categorie, justification, created_by, statut)
-       VALUES ($1, $2, $3, $4, $5, 'en_attente')
+      `INSERT INTO app.depenses (description, montant, categorie, justification, created_by, statut, validated_by, validated_at)
+       VALUES ($1, $2, $3, $4, $5, 'valide', $5, now())
        RETURNING *`,
       [description.trim(), montantNum, categorie, justification?.trim() || null, userId]
     );

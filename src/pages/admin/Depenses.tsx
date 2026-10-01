@@ -251,7 +251,7 @@ const DepensesPage = () => {
       });
       const body = await r.json();
       if (!r.ok) throw new Error(body.error || 'Erreur');
-      toast.success('Dépense enregistrée — en attente de validation');
+      toast.success('Dépense enregistrée et validée');
       setOpenAjouter(false);
       setForm({ description: '', montant: '', categorie: '', justification: '' });
       fetchDepenses();
@@ -288,8 +288,8 @@ const DepensesPage = () => {
             </h1>
             <p className="text-sm text-gray-500 mt-1">
               {isAdmin
-                ? 'Validez ou rejetez les dépenses déclarées par les employés.'
-                : 'Déclarez une dépense — elle sera examinée par l\'administrateur avant validation.'}
+                ? 'Suivez les dépenses déclarées par les employés.'
+                : 'Déclarez une dépense — elle est validée automatiquement.'}
             </p>
           </div>
           <div className="flex gap-2">
