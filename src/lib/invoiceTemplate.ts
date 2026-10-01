@@ -112,60 +112,62 @@ export const fmtShortDate = (d: string | Date | undefined): string => {
   }
 };
 
-const sumRow = (label: string, value: string, cls = 'sum') => `
-      <tr class="${cls}">
-        <td></td><td class="sum-label">${label}</td><td></td><td></td><td></td>
+// Ligne de récapitulatif (libellé sur toute la largeur, montant à droite).
+// keep = ne pas couper la page avant cette ligne (le bloc des totaux reste groupé).
+const sumRow = (label: string, value: string, cls = 'sum', keep = true) => `
+      <tr class="${cls}${keep ? ' keep' : ''}">
+        <td class="sum-label" colspan="5">${label}</td>
         <td class="r">${value}</td>
       </tr>`;
 
 // Styles communs aux documents RealTech (factures, rapports) — format A4
 export const DOC_CSS = `  * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: Helvetica, Arial, sans-serif; color: #1f2937; background: #fff; }
-  .invoice-container { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 18mm 15mm 22mm;
+  .invoice-container { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 14mm 15mm 14mm;
     display: flex; flex-direction: column; background: #fff; position: relative; }
 
   .head { display: flex; justify-content: space-between; align-items: flex-start; }
   .head .co-name { color: #2f6fb2; font-size: 24px; font-weight: 700; margin-bottom: 8px; }
   .head .co-lines { font-size: 11.5px; color: #374151; line-height: 1.55; }
   .head img.logo { height: 52px; object-fit: contain; }
-  .rule { border: none; border-top: 2px solid #2f6fb2; margin: 16px 0 22px; }
+  .rule { border: none; border-top: 2px solid #2f6fb2; margin: 12px 0 16px; }
 
-  h1.doc-title { text-align: center; font-size: 21px; letter-spacing: 1px; color: #111827; margin-bottom: 22px; }
+  h1.doc-title { text-align: center; font-size: 21px; letter-spacing: 1px; color: #111827; margin-bottom: 16px; }
 
   .meta { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 4px; }
   .meta .num { font-weight: 700; }
   .meta .date b { font-weight: 700; }
   .status { font-size: 11.5px; color: #374151; margin-bottom: 4px; }
-  .status-gap { height: 16px; }
+  .status-gap { height: 10px; }
   .status b.paid { color: #047857; }
   .status b.unpaid { color: #b45309; }
 
   .section-band { background: #eceef1; padding: 6px 10px; font-size: 11.5px; font-weight: 700;
     letter-spacing: 0.5px; color: #374151; margin-bottom: 6px; }
   .client-name { font-size: 14px; font-weight: 700; margin: 4px 0 2px; }
-  .client-sub { font-size: 11.5px; color: #4b5563; margin-bottom: 22px; line-height: 1.5; }
+  .client-sub { font-size: 11.5px; color: #4b5563; margin-bottom: 14px; line-height: 1.5; }
 
   table.items { width: 100%; border-collapse: collapse; font-size: 11.5px; margin-bottom: 6px; }
-  table.items th { background: #4a86c8; color: #fff; font-weight: 700; padding: 8px 6px;
+  table.items th { background: #4a86c8; color: #fff; font-weight: 700; padding: 6px 6px;
     border: 1px solid #3d74b0; }
-  table.items td { padding: 8px 6px; border: 1px solid #d7dde5; vertical-align: top; }
+  table.items td { padding: 5px 6px; border: 1px solid #d7dde5; vertical-align: top; }
   table.items tbody tr:nth-child(odd) { background: #f7f9fb; }
   td.c, th.c { text-align: center; }
   td.r, th.r { text-align: right; }
   td.code { font-size: 10.5px; color: #4b5563; }
-  tr.sum td { border: 1px solid #d7dde5; background: #f1f4f8; font-size: 11.5px; padding: 7px 6px; }
+  tr.sum td { border: 1px solid #d7dde5; background: #f1f4f8; font-size: 11.5px; padding: 5px 6px; }
   tr.sum .sum-label { font-weight: 700; text-align: right; }
-  tr.total td { background: #e6eaf0; font-weight: 700; font-size: 12.5px; padding: 9px 6px;
+  tr.total td { background: #e6eaf0; font-weight: 700; font-size: 12.5px; padding: 6px 6px;
     border: 1px solid #c9d2dd; }
   tr.total .sum-label { text-align: right; }
 
   .payment { font-size: 12px; margin-top: 14px; }
   .notes { font-size: 11.5px; color: #4b5563; margin-top: 6px; font-style: italic; }
 
-  .sign { margin-top: 40px; font-size: 11.5px; font-style: italic; color: #374151; }
-  .sign .line { margin-top: 46px; border-top: 1px solid #9ca3af; width: 220px; }
+  .stamp { text-align: right; margin-top: 10px; }
+  .stamp img { width: 130px; opacity: 0.95; }
 
-  .invoice-footer { margin-top: auto; padding-top: 28px; text-align: center; font-size: 10px;
+  .invoice-footer { margin-top: auto; padding-top: 16px; text-align: center; font-size: 10px;
     color: #9ca3af; font-style: italic; }
 
   @page { size: A4; margin: 0; }
@@ -229,7 +231,7 @@ export function buildInvoiceHTML(invoice: Invoice): string {
   }).join('');
 
   const discountRows = discount > 0
-    ? sumRow('SOUS-TOTAL', `${fmtAmount(itemsSum)} FCFA`) + sumRow('REMISE', `− ${fmtAmount(discount)} FCFA`)
+    ? sumRow('SOUS-TOTAL', `${fmtAmount(itemsSum)} FCFA`, 'sum', false) + sumRow('REMISE', `− ${fmtAmount(discount)} FCFA`)
     : '';
 
   // Après le TOTAL : versements reçus, total payé et reste à payer (état de la commande)
@@ -305,18 +307,13 @@ ${DOC_CSS}
       <tbody>
         ${rowsHtml}
         ${discountRows}
-        ${sumRow('TOTAL', `${fmtAmount(total)} FCFA`, 'total')}
+        ${sumRow('TOTAL', `${fmtAmount(total)} FCFA`, 'total', discount > 0)}
         ${paymentRows}
       </tbody>
     </table>
 
     ${paymentBlock}
     ${notesBlock}
-
-    <div class="sign">
-      Signature et cachet :
-      <div class="line"></div>
-    </div>
 
     <div class="invoice-footer">
       ${esc(COMPANY.name)} — Document généré le ${new Date().toLocaleString('fr-FR')}

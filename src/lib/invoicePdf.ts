@@ -49,7 +49,8 @@ export async function downloadHtmlAsPdf(html: string, filename: string): Promise
       slices.push([0, totalH]);
     } else {
       const top0 = container.getBoundingClientRect().top;
-      const breakpoints = Array.from(container.querySelectorAll('tr, .section-band, .avoid-break, h1, h2'))
+      // tr.keep : lignes de totaux, jamais séparées du reste du bloc (ni du cachet qui suit)
+      const breakpoints = Array.from(container.querySelectorAll('tr:not(.keep), .section-band, .avoid-break, h1, h2'))
         .map(el => (el as HTMLElement).getBoundingClientRect().top - top0)
         .filter(y => y > 0)
         .sort((a, b) => a - b);
@@ -104,7 +105,7 @@ export async function downloadHtmlAsPdf(html: string, filename: string): Promise
 // Facture en PDF (cachet de l'entreprise en option, ex. commande terminée)
 export async function downloadInvoicePdf(invoice: Invoice, opts: { stamp?: boolean } = {}): Promise<void> {
   const stampHtml = opts.stamp
-    ? `<div style="text-align:center;margin-top:16px"><img src="${cachetUrl}" alt="cachet" style="width:150px;opacity:0.95"/></div>`
+    ? `<div class="stamp"><img src="${cachetUrl}" alt="cachet"/></div>`
     : '';
   const html = buildInvoiceHTML(invoice).replace('<div class="invoice-footer">', stampHtml + '<div class="invoice-footer">');
   await downloadHtmlAsPdf(html, `Facture-${invoice.invoice_number}.pdf`);
