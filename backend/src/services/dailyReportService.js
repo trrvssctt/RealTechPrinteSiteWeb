@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const pool = require('../config/db');
 const n8n = require('./n8nWebhookService');
+const { splitVente, totauxVentes } = require('../models/rapportModel');
 
 // ─── Requêtes base de données ───────────────────────────────────────────────
 
@@ -31,7 +32,9 @@ async function getVentesJour(date) {
           )
         ) FILTER (WHERE oi.id IS NOT NULL),
         '[]'
-      ) AS lignes
+      ) AS lignes,
+      COALESCE(SUM(oi.total) FILTER (WHERE oi.service_id IS NOT NULL), 0) AS lignes_services,
+      COALESCE(SUM(oi.total), 0) AS lignes_total
     FROM app.orders o
     LEFT JOIN app.clients  c  ON c.id = o.client_id
     LEFT JOIN app.users    u  ON u.id = o.created_by
@@ -40,7 +43,7 @@ async function getVentesJour(date) {
     GROUP BY o.id, c.full_name, u.full_name
     ORDER BY o.placed_at
   `, [date]);
-  return rows;
+  return rows.map(splitVente);
 }
 
 async function getSortiesStock(date) {
@@ -150,12 +153,13 @@ async function buildWorkbook(date, ventes, sorties, depenses) {
     { header: 'Employé',       key: 'employe', width: 22 },
     { header: 'Produits / Services', key: 'lignes', width: 40 },
     { header: 'Statut',        key: 'status',  width: 14 },
+    { header: 'Produits (FCFA)', key: 'produits', width: 16 },
+    { header: 'Services (FCFA)', key: 'services', width: 16 },
     { header: 'Montant (FCFA)', key: 'montant', width: 16 },
   ];
 
   styleHeader(wsVentes.getRow(1));
 
-  let totalVentes = 0;
   ventes.forEach((v, i) => {
     const lignesTxt = (v.lignes || [])
       .map(l => `${l.produit} ×${l.qte} = ${fmtMontant(l.total)} FCFA`)
@@ -167,22 +171,25 @@ async function buildWorkbook(date, ventes, sorties, depenses) {
       employe: v.employe || '—',
       lignes:  lignesTxt || '—',
       status:  v.status,
+      produits: v.montant_produits,
+      services: v.montant_services,
       montant: parseFloat(v.total_amount || 0),
     });
-    wsVentes.getRow(row.number).getCell('montant').numFmt = '#,##0.00';
+    ['produits', 'services', 'montant'].forEach(k => { row.getCell(k).numFmt = '#,##0.00'; });
     styleDataRow(row, i);
-    totalVentes += parseFloat(v.total_amount || 0);
   });
 
-  // Ligne total
+  // Ligne total (les ventes annulées sont listées mais exclues du CA)
+  const ca = totauxVentes(ventes);
+  const totalVentes = ca.total;
   const totalRowV = wsVentes.addRow({
-    heure: '', id: '', client: '', employe: '', lignes: '',
-    status: 'TOTAL', montant: totalVentes,
+    heure: '', id: '', client: '', employe: '', lignes: 'TOTAL (hors ventes annulées)',
+    status: '', produits: ca.produits, services: ca.services, montant: ca.total,
   });
   totalRowV.eachCell(c => { c.fill = TOTAL_FILL; c.font = { bold: true, name: 'Calibri' }; });
-  totalRowV.getCell('montant').numFmt = '#,##0.00';
+  ['produits', 'services', 'montant'].forEach(k => { totalRowV.getCell(k).numFmt = '#,##0.00'; });
 
-  addTitleRow(wsVentes, `Ventes du ${dateLabel}`, 7);
+  addTitleRow(wsVentes, `Ventes du ${dateLabel}`, 9);
 
   // ── Feuille 2 : Sorties de stock ──────────────────────────────────────────
   const wsSorties = wb.addWorksheet('Sorties Stock', { tabColor: { argb: 'FFE67E22' } });
@@ -211,7 +218,7 @@ async function buildWorkbook(date, ventes, sorties, depenses) {
       employe:     s.employe || '—',
     });
     styleDataRow(row, i);
-    totalQteSorties += parseInt(s.quantity || 0);
+    if (s.status !== 'voided') totalQteSorties += parseInt(s.quantity || 0);
   });
 
   const totalRowS = wsSorties.addRow({
@@ -257,7 +264,7 @@ async function buildWorkbook(date, ventes, sorties, depenses) {
 
   addTitleRow(wsDepenses, `Dépenses du ${dateLabel}`, 5);
 
-  return { wb, totalVentes, totalQteSorties, totalDepenses, dateLabel };
+  return { wb, totalVentes, totalVentesProduits: ca.produits, totalVentesServices: ca.services, totalQteSorties, totalDepenses, dateLabel };
 }
 
 // ─── Point d'entrée principal ─────────────────────────────────────────────────
@@ -273,7 +280,7 @@ async function generateAndSendDailyReport(targetDate) {
     getDepenses(date),
   ]);
 
-  const { wb, totalVentes, totalQteSorties, totalDepenses, dateLabel } =
+  const { wb, totalVentes, totalVentesProduits, totalVentesServices, totalQteSorties, totalDepenses, dateLabel } =
     await buildWorkbook(date, ventes, sorties, depenses);
 
   // Sauvegarder le fichier temporairement
@@ -303,6 +310,8 @@ async function generateAndSendDailyReport(targetDate) {
           sorties_count: sorties.length,
           depenses_count: depenses.length,
           total_ventes: totalVentes,
+          total_ventes_produits: totalVentesProduits,
+          total_ventes_services: totalVentesServices,
           total_depenses: totalDepenses,
         }),
       ]
@@ -317,6 +326,8 @@ async function generateAndSendDailyReport(targetDate) {
     filepath,
     filename,
     totalVentes,
+    totalVentesProduits,
+    totalVentesServices,
     totalQteSorties,
     totalDepenses,
     ventesCount:   ventes.length,

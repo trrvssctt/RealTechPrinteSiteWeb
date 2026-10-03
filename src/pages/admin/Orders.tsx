@@ -665,6 +665,14 @@ const Orders = () => {
     const total = orders.length;
     const completedOrders = orders.filter(o => o.status === 'completed');
     const revenue = completedOrders.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0);
+    // Part services du CA : au prorata des lignes, pour répartir une éventuelle remise
+    const revenueServices = completedOrders.reduce((sum, o) => {
+      const items: any[] = o.items || [];
+      const lignesTotal = items.reduce((s2, it) => s2 + (Number(it.total) || 0), 0);
+      const lignesServices = items.filter(it => it.service_id).reduce((s2, it) => s2 + (Number(it.total) || 0), 0);
+      return sum + (lignesTotal > 0 ? (Number(o.total_amount) || 0) * lignesServices / lignesTotal : 0);
+    }, 0);
+    const revenueProduits = revenue - revenueServices;
     const gainReel = completedOrders.reduce((sum, o) => {
       const real = Number(o.total_amount) || 0;
       const cost = Number(o.cost_amount) || 0;
@@ -679,7 +687,7 @@ const Orders = () => {
     const in_progress = orders.filter(o => o.status === 'in_progress').length;
     const completed   = completedOrders.length;
 
-    return { total, revenue, gainReel, gainEstime, pending, in_progress, completed };
+    return { total, revenue, revenueProduits, revenueServices, gainReel, gainEstime, pending, in_progress, completed };
   }, [orders]);
 
   // Pagination calculations
@@ -1459,9 +1467,12 @@ const formatDate = (dateString: string) => {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-emerald-600/80 uppercase tracking-wide">CA réel</p>
+                <p className="text-xs font-medium text-emerald-600/80 uppercase tracking-wide">CA réel (produits + services)</p>
                 <p className="text-2xl font-bold text-emerald-900 mt-0.5">{formatCurrency(calculateTotals.revenue)}</p>
-                <p className="text-xs text-emerald-600/60 mt-0.5">ventes complétées</p>
+                <div className="text-xs text-emerald-700/80 mt-1 space-y-0.5">
+                  <p>Produits : <span className="font-semibold">{formatCurrency(calculateTotals.revenueProduits)}</span></p>
+                  <p>Services : <span className="font-semibold">{formatCurrency(calculateTotals.revenueServices)}</span></p>
+                </div>
               </div>
               <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center">
                 <CreditCard className="h-5 w-5 text-emerald-600" />

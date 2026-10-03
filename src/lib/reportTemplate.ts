@@ -11,6 +11,7 @@ export interface ReportData {
   sources: { ventes?: boolean; stock?: boolean; depenses?: boolean };
   ventes: Array<{
     id: string; placed_at: string; status: string; total_amount: number | string;
+    montant_produits?: number | string; montant_services?: number | string;
     client: string | null; employe: string | null;
     lignes: Array<{ produit: string; qte: number; pu: number | string; total: number | string }>;
   }>;
@@ -51,12 +52,16 @@ export function buildReportHTML(
   // Les ventes annulées sont listées mais exclues du chiffre d'affaires
   const ventesActives = data.ventes.filter(v => v.status !== 'cancelled');
   const ca = ventesActives.reduce((s, v) => s + Number(v.total_amount || 0), 0);
+  const caServices = ventesActives.reduce((s, v) => s + Number(v.montant_services || 0), 0);
+  const caProduits = ca - caServices;
   const qteSortie = data.sorties.reduce((s, m) => s + Number(m.quantity || 0), 0);
   const totalDepenses = data.depenses.reduce((s, d) => s + Number(d.montant || 0), 0);
 
   const kpis: string[] = [];
   if (showVentes) {
-    kpis.push(`<div class="kpi"><div class="l">Chiffre d'affaires</div><div class="v">${fmtAmount(ca)} FCFA</div><div class="s">${ventesActives.length} vente(s)</div></div>`);
+    kpis.push(`<div class="kpi"><div class="l">CA Produits</div><div class="v">${fmtAmount(caProduits)} FCFA</div></div>`);
+    kpis.push(`<div class="kpi"><div class="l">CA Services</div><div class="v">${fmtAmount(caServices)} FCFA</div></div>`);
+    kpis.push(`<div class="kpi"><div class="l">CA Total (produits + services)</div><div class="v">${fmtAmount(ca)} FCFA</div><div class="s">${ventesActives.length} vente(s)</div></div>`);
   }
   if (showStock) {
     kpis.push(`<div class="kpi"><div class="l">Sorties de stock</div><div class="v">${fmtAmount(qteSortie)}</div><div class="s">${data.sorties.length} mouvement(s)</div></div>`);
@@ -77,10 +82,12 @@ export function buildReportHTML(
         <tr>
           <th class="c" style="width:5%">N°</th>
           <th style="width:18%">Date</th>
-          <th style="width:17%">Client</th>
-          <th style="width:33%">Articles</th>
-          <th class="c" style="width:12%">Statut</th>
-          <th class="r" style="width:15%">Montant (FCFA)</th>
+          <th style="width:14%">Client</th>
+          <th style="width:23%">Articles</th>
+          <th class="c" style="width:10%">Statut</th>
+          <th class="r" style="width:10%">Produits</th>
+          <th class="r" style="width:10%">Services</th>
+          <th class="r" style="width:12%">Montant (FCFA)</th>
         </tr>
       </thead>
       <tbody>
@@ -94,10 +101,14 @@ export function buildReportHTML(
           <td>${esc(v.client || '—')}</td>
           <td>${articles}</td>
           <td class="c">${esc(ORDER_STATUS_LABELS[v.status] || v.status)}</td>
+          <td class="r">${fmtAmount(Number(v.montant_produits ?? v.total_amount ?? 0))}</td>
+          <td class="r">${fmtAmount(Number(v.montant_services || 0))}</td>
           <td class="r">${fmtAmount(Number(v.total_amount || 0))}</td>
         </tr>`;
         }).join('')}
-        ${totalRow('TOTAL (hors ventes annulées)', `${fmtAmount(ca)} FCFA`, 5)}
+        ${totalRow('Dont produits', `${fmtAmount(caProduits)} FCFA`, 7)}
+        ${totalRow('Dont services', `${fmtAmount(caServices)} FCFA`, 7)}
+        ${totalRow('TOTAL (hors ventes annulées)', `${fmtAmount(ca)} FCFA`, 7)}
       </tbody>
     </table>`}`;
 
@@ -167,8 +178,8 @@ export function buildReportHTML(
 <title>${title} — ${esc(data.periodLabel)}</title>
 <style>
 ${DOC_CSS}
-  .kpis { display: flex; gap: 8px; margin-bottom: 22px; }
-  .kpi { flex: 1; border: 1px solid #d7dde5; background: #f7f9fb; padding: 9px 10px; }
+  .kpis { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+  .kpi { flex: 1 1 30%; border: 1px solid #d7dde5; background: #f7f9fb; padding: 9px 10px; }
   .kpi .l { font-size: 9.5px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.4px; }
   .kpi .v { font-size: 14px; font-weight: 700; color: #2f6fb2; margin-top: 3px; }
   .kpi .v.neg { color: #b91c1c; }

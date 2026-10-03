@@ -629,18 +629,23 @@ exports.updateOrder = async (req, res, next) => {
         restoredProductIds.push(ri.product_id);
 
         try {
-          let origId = null;
-          if (ri.order_item_id) {
-            const find = await tx.query(
-              `SELECT id FROM app.stock_mouvement WHERE order_id=$1 AND order_item_id=$2 AND movement_type='out' AND status='active' ORDER BY created_at DESC LIMIT 1`,
-              [id, ri.order_item_id]
-            );
-            if (find.rows[0]) origId = find.rows[0].id;
-          }
-          if (origId) {
+          // Sorties d'origine : par ligne de commande, sinon par produit (les ventes
+          // directes enregistrent leur sortie sans order_item_id). Elles ne sont
+          // annulées que si tout ce qui était sorti revient en stock ; sur un retour
+          // partiel elles restent actives et seule l'entrée « retour » est ajoutée.
+          const { rows: outs } = await tx.query(
+            `SELECT id, quantity FROM app.stock_mouvement
+              WHERE order_id = $1 AND movement_type = 'out' AND status = 'active'
+                AND (order_item_id = $2 OR (order_item_id IS NULL AND product_id = $3))
+              ORDER BY created_at DESC`,
+            [id, ri.order_item_id, ri.product_id]
+          );
+          const origId = outs[0]?.id || null;
+          const totalOut = outs.reduce((sum, m) => sum + Number(m.quantity || 0), 0);
+          if (outs.length && ri.restore_qty >= totalOut) {
             await tx.query(
-              `UPDATE app.stock_mouvement SET status='voided', cancelled_at=now(), cancel_reason=$1 WHERE id=$2`,
-              [cancel_reason || null, origId]
+              `UPDATE app.stock_mouvement SET status='voided', cancelled_at=now(), cancel_reason=$1 WHERE id = ANY($2::uuid[])`,
+              [cancel_reason || null, outs.map(m => m.id)]
             );
           }
           await tx.query(

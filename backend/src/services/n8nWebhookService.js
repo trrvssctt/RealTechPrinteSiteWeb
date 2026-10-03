@@ -416,13 +416,15 @@ async function notifyStockEntry(movement) {
 }
 
 async function notifyDailyReport(reportInfo) {
-  const { date, filepath, filename, totalVentes, totalQteSorties, totalDepenses, ventesCount, depensesCount } = reportInfo;
+  const { date, filepath, filename, totalVentes, totalVentesProduits = 0, totalVentesServices = 0, totalQteSorties, totalDepenses, ventesCount, depensesCount } = reportInfo;
 
   const message = [
     `📊 *Rapport Journalier* — RealTech Print`,
     `📅 ${new Date(date).toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Africa/Dakar' })}`,
     ``,
     `💰 Ventes : ${Number(totalVentes).toLocaleString('fr-FR')} FCFA (${ventesCount} commandes)`,
+    `   • Produits : ${Number(totalVentesProduits).toLocaleString('fr-FR')} FCFA`,
+    `   • Services : ${Number(totalVentesServices).toLocaleString('fr-FR')} FCFA`,
     `📦 Sorties stock : ${totalQteSorties} unités`,
     `💸 Dépenses : ${Number(totalDepenses).toLocaleString('fr-FR')} FCFA (${depensesCount} enregistrements)`,
     ``,
@@ -436,7 +438,7 @@ async function notifyDailyReport(reportInfo) {
     report_path:   filepath,
     report_name:   filename,
     report_date:   date,
-    data: { totalVentes, totalQteSorties, totalDepenses, ventesCount, depensesCount },
+    data: { totalVentes, totalVentesProduits, totalVentesServices, totalQteSorties, totalDepenses, ventesCount, depensesCount },
   });
 }
 

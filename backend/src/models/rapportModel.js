@@ -22,6 +22,23 @@ function buildDateRange(start, end) {
   return { s, e };
 }
 
+// Répartit le montant réel d'une commande entre produits et services, au prorata
+// des lignes (une remise globale est ainsi partagée) : produits + services = total.
+function splitVente(v) {
+  const total = Number(v.total_amount || 0);
+  const lignesServices = Number(v.lignes_services || 0);
+  const lignesTotal = Number(v.lignes_total || 0);
+  const services = lignesTotal > 0 ? Math.round(total * lignesServices / lignesTotal * 100) / 100 : 0;
+  return { ...v, montant_services: services, montant_produits: Math.round((total - services) * 100) / 100 };
+}
+
+// Totaux CA (hors ventes annulées)
+function totauxVentes(ventes) {
+  const actives = ventes.filter(v => v.status !== 'cancelled');
+  const sum = (k) => Math.round(actives.reduce((s, v) => s + Number(v[k] || 0), 0) * 100) / 100;
+  return { produits: sum('montant_produits'), services: sum('montant_services'), total: sum('total_amount'), nb: actives.length };
+}
+
 // ── DB queries ────────────────────────────────────────────────────────────────
 
 async function queryVentes(start, end) {
@@ -42,10 +59,13 @@ async function queryVentes(start, end) {
             'produit', COALESCE(oi.product_name, oi.service_name, '—'),
             'qte',     oi.quantity,
             'pu',      oi.unit_price,
-            'total',   oi.total
+            'total',   oi.total,
+            'type',    CASE WHEN oi.service_id IS NOT NULL THEN 'service' ELSE 'produit' END
           )
         ) FILTER (WHERE oi.id IS NOT NULL), '[]'
-      ) AS lignes
+      ) AS lignes,
+      COALESCE(SUM(oi.total) FILTER (WHERE oi.service_id IS NOT NULL), 0) AS lignes_services,
+      COALESCE(SUM(oi.total), 0) AS lignes_total
     FROM app.orders o
     LEFT JOIN app.clients     c  ON c.id  = o.client_id
     LEFT JOIN app.users       u  ON u.id  = o.created_by
@@ -54,12 +74,12 @@ async function queryVentes(start, end) {
     GROUP BY o.id, c.full_name, u.full_name
     ORDER BY o.placed_at
   `, params);
-  return rows;
+  return rows.map(splitVente);
 }
 
 async function queryStock(start, end) {
   const params = [];
-  let where = "WHERE 1=1 AND sm.movement_type = 'out'";
+  let where = "WHERE 1=1 AND sm.movement_type = 'out' AND sm.status = 'active'";
   let idx = 1;
   if (start) { where += ` AND sm.created_at >= $${idx++}`; params.push(start); }
   if (end)   { where += ` AND sm.created_at <= $${idx++}`; params.push(end);   }
@@ -146,24 +166,45 @@ async function buildExcel(filename, sources, ventes, sorties, depenses, periodLa
       { header: 'Employé',            key: 'employe', width: 22 },
       { header: 'Produits/Services',  key: 'lignes',  width: 42 },
       { header: 'Statut',             key: 'statut',  width: 14 },
+      { header: 'Produits (FCFA)',    key: 'produits', width: 16 },
+      { header: 'Services (FCFA)',    key: 'services', width: 16 },
       { header: 'Montant (FCFA)',     key: 'montant', width: 16 },
     ];
     styleHeader(ws.getRow(1));
-    let total = 0;
     ventes.forEach((v, i) => {
       const lignesTxt = (v.lignes || []).map(l => `${l.produit} ×${l.qte}`).join(' | ');
       const row = ws.addRow({
         date: fmtTime(v.placed_at), client: v.client || '—', employe: v.employe || '—',
-        lignes: lignesTxt || '—', statut: v.status, montant: parseFloat(v.total_amount || 0),
+        lignes: lignesTxt || '—', statut: v.status,
+        produits: v.montant_produits, services: v.montant_services, montant: parseFloat(v.total_amount || 0),
       });
-      row.getCell('montant').numFmt = '#,##0.00';
+      ['produits', 'services', 'montant'].forEach(k => { row.getCell(k).numFmt = '#,##0.00'; });
       styleRow(row, i);
-      total += parseFloat(v.total_amount || 0);
+      if (v.status === 'cancelled') row.eachCell(c => { c.font = { name: 'Calibri', size: 10, strike: true, color: { argb: 'FF999999' } }; });
     });
-    const tr = ws.addRow({ date: '', client: '', employe: '', lignes: '', statut: 'TOTAL', montant: total });
+    const t = totauxVentes(ventes);
+    const tr = ws.addRow({ date: '', client: '', employe: '', lignes: 'TOTAL (hors ventes annulées)', statut: '', produits: t.produits, services: t.services, montant: t.total });
     tr.eachCell(c => { c.fill = TOTAL_FILL; c.font = { bold: true, name: 'Calibri' }; });
-    tr.getCell('montant').numFmt = '#,##0.00';
-    addTitle(ws, `Ventes — ${periodLabel}`, 6);
+    ['produits', 'services', 'montant'].forEach(k => { tr.getCell(k).numFmt = '#,##0.00'; });
+    addTitle(ws, `Ventes — ${periodLabel}`, 8);
+
+    // ── Synthèse du chiffre d'affaires ──
+    const syn = wb.addWorksheet('Synthèse CA', { tabColor: { argb: 'FF1E3A5F' } });
+    syn.columns = [
+      { header: 'Chiffre d\'affaires', key: 'label', width: 32 },
+      { header: 'Montant (FCFA)', key: 'montant', width: 18 },
+      { header: 'Part', key: 'part', width: 10 },
+    ];
+    styleHeader(syn.getRow(1));
+    [['Produits', t.produits], ['Services', t.services], ['Total produits + services', t.total]].forEach(([label, m], i) => {
+      const r = syn.addRow({ label, montant: m, part: t.total > 0 ? m / t.total : 0 });
+      r.getCell('montant').numFmt = '#,##0.00';
+      r.getCell('part').numFmt = '0.0%';
+      styleRow(r, i);
+      if (i === 2) r.eachCell(c => { c.fill = TOTAL_FILL; c.font = { bold: true, name: 'Calibri' }; });
+    });
+    syn.addRow({ label: `${t.nb} vente(s), hors ventes annulées` });
+    addTitle(syn, `Synthèse du chiffre d'affaires — ${periodLabel}`, 3);
   }
 
   // ── Feuille Stock ──
@@ -232,15 +273,26 @@ async function buildExcel(filename, sources, ventes, sorties, depenses, periodLa
 function buildCSV(ventes, sorties, depenses) {
   const rows = [];
 
-  rows.push(['=== VENTES ==='], ['Date', 'Client', 'Employé', 'Produits', 'Statut', 'Montant (FCFA)']);
+  const t = totauxVentes(ventes);
+  rows.push(
+    ['=== SYNTHÈSE CHIFFRE D\'AFFAIRES (hors ventes annulées) ==='],
+    ['CA Produits (FCFA)', t.produits.toFixed(2)],
+    ['CA Services (FCFA)', t.services.toFixed(2)],
+    ['CA Total (FCFA)', t.total.toFixed(2)],
+    [],
+  );
+
+  rows.push(['=== VENTES ==='], ['Date', 'Client', 'Employé', 'Produits', 'Statut', 'Produits (FCFA)', 'Services (FCFA)', 'Montant (FCFA)']);
   ventes.forEach(v => {
     const lignes = (v.lignes || []).map(l => `${l.produit} ×${l.qte}`).join(' | ');
     rows.push([
       v.placed_at ? new Date(v.placed_at).toLocaleString('fr-FR') : '—',
       v.client || '—', v.employe || '—', lignes || '—', v.status,
+      Number(v.montant_produits).toFixed(2), Number(v.montant_services).toFixed(2),
       parseFloat(v.total_amount || 0).toFixed(2),
     ]);
   });
+  rows.push(['', '', '', 'TOTAL (hors ventes annulées)', '', t.produits.toFixed(2), t.services.toFixed(2), t.total.toFixed(2)]);
 
   rows.push([], ['=== SORTIES STOCK ==='], ['Date', 'Produit', 'Quantité', 'Motif', 'Référence', 'Employé']);
   sorties.forEach(s => {
@@ -359,4 +411,4 @@ async function getRapportData(id) {
   return { report: rows[0], data: await collectReportData(params) };
 }
 
-module.exports = { listRapports, createRapport, getRapportData };
+module.exports = { listRapports, createRapport, getRapportData, splitVente, totauxVentes };
