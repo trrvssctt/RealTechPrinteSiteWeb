@@ -9,7 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const pool = require('../config/db');
 const n8n = require('./n8nWebhookService');
-const { splitVente, totauxVentes } = require('../models/rapportModel');
+const { splitVente, totauxVentes, estComptee, VENTES_NON_COMPTEES } = require('../models/rapportModel');
 
 // ─── Requêtes base de données ───────────────────────────────────────────────
 
@@ -160,7 +160,7 @@ async function buildWorkbook(date, ventes, sorties, depenses) {
 
   styleHeader(wsVentes.getRow(1));
 
-  ventes.forEach((v, i) => {
+  ventes.filter(estComptee).forEach((v, i) => {
     const lignesTxt = (v.lignes || [])
       .map(l => `${l.produit} ×${l.qte} = ${fmtMontant(l.total)} FCFA`)
       .join('\n');
@@ -183,11 +183,29 @@ async function buildWorkbook(date, ventes, sorties, depenses) {
   const ca = totauxVentes(ventes);
   const totalVentes = ca.total;
   const totalRowV = wsVentes.addRow({
-    heure: '', id: '', client: '', employe: '', lignes: 'TOTAL (hors ventes annulées)',
+    heure: '', id: '', client: '', employe: '', lignes: 'TOTAL',
     status: '', produits: ca.produits, services: ca.services, montant: ca.total,
   });
   totalRowV.eachCell(c => { c.fill = TOTAL_FILL; c.font = { bold: true, name: 'Calibri' }; });
   ['produits', 'services', 'montant'].forEach(k => { totalRowV.getCell(k).numFmt = '#,##0.00'; });
+
+  // En attente / annulées : listées à part, jamais additionnées
+  for (const grp of VENTES_NON_COMPTEES) {
+    const liste = ventes.filter(v => v.status === grp.status);
+    if (!liste.length) continue;
+    wsVentes.addRow({});
+    const h = wsVentes.addRow({ heure: grp.titre });
+    h.getCell('heure').font = { bold: true, color: { argb: 'FFB91C1C' }, name: 'Calibri' };
+    liste.forEach(v => {
+      const row = wsVentes.addRow({
+        heure: fmtDate(v.placed_at), id: v.id, client: v.client || '—', employe: v.employe || '—',
+        lignes: (v.lignes || []).map(l => `${l.produit} ×${l.qte}`).join('\n') || '—',
+        status: grp.label, montant: parseFloat(v.total_amount || 0),
+      });
+      row.getCell('montant').numFmt = '#,##0.00';
+      row.eachCell(c => { c.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF999999' } }; });
+    });
+  }
 
   addTitleRow(wsVentes, `Ventes du ${dateLabel}`, 9);
 
@@ -330,7 +348,7 @@ async function generateAndSendDailyReport(targetDate) {
     totalVentesServices,
     totalQteSorties,
     totalDepenses,
-    ventesCount:   ventes.length,
+    ventesCount:   ventes.filter(estComptee).length,
     depensesCount: depenses.length,
   });
 

@@ -32,9 +32,18 @@ function splitVente(v) {
   return { ...v, montant_services: services, montant_produits: Math.round((total - services) * 100) / 100 };
 }
 
-// Totaux CA (hors ventes annulées)
+// Seules les ventes engagées comptent dans le CA : terminées, ou en cours (déjà
+// livrées et/ou payées en partie). En attente et annulées sont listées à part.
+const STATUTS_COMPTES = ['completed', 'in_progress'];
+const estComptee = (v) => STATUTS_COMPTES.includes(v.status);
+const VENTES_NON_COMPTEES = [
+  { status: 'pending',   titre: 'COMMANDES EN ATTENTE — NON COMPTABILISÉES', label: 'en attente' },
+  { status: 'cancelled', titre: 'VENTES ANNULÉES — NON COMPTABILISÉES',      label: 'annulée' },
+];
+
+// Totaux CA (ventes engagées uniquement)
 function totauxVentes(ventes) {
-  const actives = ventes.filter(v => v.status !== 'cancelled');
+  const actives = ventes.filter(estComptee);
   const sum = (k) => Math.round(actives.reduce((s, v) => s + Number(v[k] || 0), 0) * 100) / 100;
   return { produits: sum('montant_produits'), services: sum('montant_services'), total: sum('total_amount'), nb: actives.length };
 }
@@ -171,7 +180,7 @@ async function buildExcel(filename, sources, ventes, sorties, depenses, periodLa
       { header: 'Montant (FCFA)',     key: 'montant', width: 16 },
     ];
     styleHeader(ws.getRow(1));
-    ventes.forEach((v, i) => {
+    ventes.filter(estComptee).forEach((v, i) => {
       const lignesTxt = (v.lignes || []).map(l => `${l.produit} ×${l.qte}`).join(' | ');
       const row = ws.addRow({
         date: fmtTime(v.placed_at), client: v.client || '—', employe: v.employe || '—',
@@ -180,12 +189,29 @@ async function buildExcel(filename, sources, ventes, sorties, depenses, periodLa
       });
       ['produits', 'services', 'montant'].forEach(k => { row.getCell(k).numFmt = '#,##0.00'; });
       styleRow(row, i);
-      if (v.status === 'cancelled') row.eachCell(c => { c.font = { name: 'Calibri', size: 10, strike: true, color: { argb: 'FF999999' } }; });
     });
     const t = totauxVentes(ventes);
-    const tr = ws.addRow({ date: '', client: '', employe: '', lignes: 'TOTAL (hors ventes annulées)', statut: '', produits: t.produits, services: t.services, montant: t.total });
+    const tr = ws.addRow({ date: '', client: '', employe: '', lignes: 'TOTAL', statut: '', produits: t.produits, services: t.services, montant: t.total });
     tr.eachCell(c => { c.fill = TOTAL_FILL; c.font = { bold: true, name: 'Calibri' }; });
     ['produits', 'services', 'montant'].forEach(k => { tr.getCell(k).numFmt = '#,##0.00'; });
+
+    // En attente / annulées : listées à part, jamais additionnées
+    for (const grp of VENTES_NON_COMPTEES) {
+      const liste = ventes.filter(v => v.status === grp.status);
+      if (!liste.length) continue;
+      ws.addRow({});
+      const h = ws.addRow({ date: grp.titre });
+      h.getCell('date').font = { bold: true, color: { argb: 'FFB91C1C' }, name: 'Calibri' };
+      liste.forEach(v => {
+        const row = ws.addRow({
+          date: fmtTime(v.placed_at), client: v.client || '—', employe: v.employe || '—',
+          lignes: (v.lignes || []).map(l => `${l.produit} ×${l.qte}`).join(' | ') || '—',
+          statut: grp.label, montant: parseFloat(v.total_amount || 0),
+        });
+        row.getCell('montant').numFmt = '#,##0.00';
+        row.eachCell(c => { c.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF999999' } }; });
+      });
+    }
     addTitle(ws, `Ventes — ${periodLabel}`, 8);
 
     // ── Synthèse du chiffre d'affaires ──
@@ -203,7 +229,7 @@ async function buildExcel(filename, sources, ventes, sorties, depenses, periodLa
       styleRow(r, i);
       if (i === 2) r.eachCell(c => { c.fill = TOTAL_FILL; c.font = { bold: true, name: 'Calibri' }; });
     });
-    syn.addRow({ label: `${t.nb} vente(s), hors ventes annulées` });
+    syn.addRow({ label: `${t.nb} vente(s) terminées ou en cours (hors attente et annulées)` });
     addTitle(syn, `Synthèse du chiffre d'affaires — ${periodLabel}`, 3);
   }
 
@@ -275,7 +301,7 @@ function buildCSV(ventes, sorties, depenses) {
 
   const t = totauxVentes(ventes);
   rows.push(
-    ['=== SYNTHÈSE CHIFFRE D\'AFFAIRES (hors ventes annulées) ==='],
+    ['=== SYNTHÈSE CHIFFRE D\'AFFAIRES (ventes terminées ou en cours) ==='],
     ['CA Produits (FCFA)', t.produits.toFixed(2)],
     ['CA Services (FCFA)', t.services.toFixed(2)],
     ['CA Total (FCFA)', t.total.toFixed(2)],
@@ -283,7 +309,7 @@ function buildCSV(ventes, sorties, depenses) {
   );
 
   rows.push(['=== VENTES ==='], ['Date', 'Client', 'Employé', 'Produits', 'Statut', 'Produits (FCFA)', 'Services (FCFA)', 'Montant (FCFA)']);
-  ventes.forEach(v => {
+  ventes.filter(estComptee).forEach(v => {
     const lignes = (v.lignes || []).map(l => `${l.produit} ×${l.qte}`).join(' | ');
     rows.push([
       v.placed_at ? new Date(v.placed_at).toLocaleString('fr-FR') : '—',
@@ -292,7 +318,19 @@ function buildCSV(ventes, sorties, depenses) {
       parseFloat(v.total_amount || 0).toFixed(2),
     ]);
   });
-  rows.push(['', '', '', 'TOTAL (hors ventes annulées)', '', t.produits.toFixed(2), t.services.toFixed(2), t.total.toFixed(2)]);
+  rows.push(['', '', '', 'TOTAL', '', t.produits.toFixed(2), t.services.toFixed(2), t.total.toFixed(2)]);
+
+  for (const grp of VENTES_NON_COMPTEES) {
+    const liste = ventes.filter(v => v.status === grp.status);
+    if (!liste.length) continue;
+    rows.push([], [`=== ${grp.titre} ===`], ['Date', 'Client', 'Employé', 'Produits', 'Montant (FCFA)']);
+    liste.forEach(v => rows.push([
+      v.placed_at ? new Date(v.placed_at).toLocaleString('fr-FR') : '—',
+      v.client || '—', v.employe || '—',
+      (v.lignes || []).map(l => `${l.produit} ×${l.qte}`).join(' | ') || '—',
+      parseFloat(v.total_amount || 0).toFixed(2),
+    ]));
+  }
 
   rows.push([], ['=== SORTIES STOCK ==='], ['Date', 'Produit', 'Quantité', 'Motif', 'Référence', 'Employé']);
   sorties.forEach(s => {
@@ -411,4 +449,4 @@ async function getRapportData(id) {
   return { report: rows[0], data: await collectReportData(params) };
 }
 
-module.exports = { listRapports, createRapport, getRapportData, splitVente, totauxVentes };
+module.exports = { listRapports, createRapport, getRapportData, splitVente, totauxVentes, estComptee, VENTES_NON_COMPTEES };

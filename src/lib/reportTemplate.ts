@@ -49,8 +49,13 @@ export function buildReportHTML(
   const showStock = src.stock !== false;
   const showDepenses = src.depenses !== false;
 
-  // Les ventes annulées sont listées mais exclues du chiffre d'affaires
-  const ventesActives = data.ventes.filter(v => v.status !== 'cancelled');
+  // Seules les ventes terminées ou en cours comptent dans le chiffre d'affaires ;
+  // les commandes en attente et les ventes annulées sont listées à part.
+  const ventesActives = data.ventes.filter(v => v.status === 'completed' || v.status === 'in_progress');
+  const nonComptees = [
+    { titre: 'COMMANDES EN ATTENTE — NON COMPTABILISÉES', liste: data.ventes.filter(v => v.status === 'pending') },
+    { titre: 'VENTES ANNULÉES — NON COMPTABILISÉES', liste: data.ventes.filter(v => v.status === 'cancelled') },
+  ];
   const ca = ventesActives.reduce((s, v) => s + Number(v.total_amount || 0), 0);
   const caServices = ventesActives.reduce((s, v) => s + Number(v.montant_services || 0), 0);
   const caProduits = ca - caServices;
@@ -76,7 +81,7 @@ export function buildReportHTML(
 
   const ventesSection = !showVentes ? '' : `
     <div class="section-band">VENTES</div>
-    ${data.ventes.length === 0 ? '<p class="empty">Aucune vente sur la période.</p>' : `
+    ${ventesActives.length === 0 ? '<p class="empty">Aucune vente sur la période.</p>' : `
     <table class="items">
       <thead>
         <tr>
@@ -91,11 +96,10 @@ export function buildReportHTML(
         </tr>
       </thead>
       <tbody>
-        ${data.ventes.map((v, i) => {
-          const cancelled = v.status === 'cancelled';
+        ${ventesActives.map((v, i) => {
           const articles = (v.lignes || []).map(l => `${esc(l.produit)} ×${l.qte}`).join('<br/>') || '—';
           return `
-        <tr class="${cancelled ? 'cancelled' : ''}">
+        <tr>
           <td class="c">${i + 1}</td>
           <td class="nowrap">${esc(fmtDateTime(v.placed_at))}</td>
           <td>${esc(v.client || '—')}</td>
@@ -108,9 +112,32 @@ export function buildReportHTML(
         }).join('')}
         ${totalRow('Dont produits', `${fmtAmount(caProduits)} FCFA`, 7)}
         ${totalRow('Dont services', `${fmtAmount(caServices)} FCFA`, 7)}
-        ${totalRow('TOTAL (hors ventes annulées)', `${fmtAmount(ca)} FCFA`, 7)}
+        ${totalRow('TOTAL', `${fmtAmount(ca)} FCFA`, 7)}
       </tbody>
-    </table>`}`;
+    </table>`}
+    ${nonComptees.filter(g => g.liste.length).map(g => `
+    <div class="section-band">${g.titre}</div>
+    <table class="items">
+      <thead>
+        <tr>
+          <th class="c" style="width:5%">N°</th>
+          <th style="width:18%">Date</th>
+          <th style="width:17%">Client</th>
+          <th style="width:45%">Articles</th>
+          <th class="r" style="width:15%">Montant (FCFA)</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${g.liste.map((v, i) => `
+        <tr class="cancelled">
+          <td class="c">${i + 1}</td>
+          <td class="nowrap">${esc(fmtDateTime(v.placed_at))}</td>
+          <td>${esc(v.client || '—')}</td>
+          <td>${(v.lignes || []).map(l => `${esc(l.produit)} ×${l.qte}`).join('<br/>') || '—'}</td>
+          <td class="r">${fmtAmount(Number(v.total_amount || 0))}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`).join('')}`;
 
   const stockSection = !showStock ? '' : `
     <div class="section-band">SORTIES DE STOCK</div>

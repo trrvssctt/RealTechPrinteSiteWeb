@@ -669,6 +669,21 @@ exports.updateOrder = async (req, res, next) => {
           WHERE id = $4`,
         [status, cancel_reason || null, JSON.stringify(returnMeta), id]
       );
+
+      // L'argent de la vente ne doit plus être compté nulle part : les versements
+      // passent « remboursés » et les factures émises « annulées » (numéro conservé).
+      await tx.query(
+        `UPDATE app.payments
+            SET status = 'refunded',
+                note = CONCAT_WS(' — ', NULLIF(note, ''), 'Commande annulée le ' || to_char(now() AT TIME ZONE 'Africa/Dakar', 'DD/MM/YYYY'))
+          WHERE order_id = $1 AND status = 'paid'`,
+        [id]
+      );
+      await tx.query(
+        `UPDATE app.invoices SET status = 'cancelled'
+          WHERE order_id = $1 AND status = 'issued' AND invoice_type <> 'proforma'`,
+        [id]
+      );
     }
 
     // Generic status update for other transitions (pending, etc.)

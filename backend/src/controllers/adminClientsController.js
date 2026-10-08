@@ -16,8 +16,8 @@ const listClients = async (req, res, next) => {
         c.id, c.full_name, c.email, c.phone,
         c.is_active, c.created_at, c.created_by_channel,
         COUNT(DISTINCT o.id)::int                          AS total_orders,
-        COALESCE(SUM(o.total_amount), 0)                   AS total_spent,
-        COALESCE(AVG(o.total_amount), 0)                   AS avg_order,
+        COALESCE(SUM(o.total_amount) FILTER (WHERE o.status <> 'cancelled'), 0) AS total_spent,
+        COALESCE(AVG(o.total_amount) FILTER (WHERE o.status <> 'cancelled'), 0) AS avg_order,
         MAX(o.placed_at)                                   AS last_order_at,
         COALESCE(SUM(CASE WHEN o.status='completed'
           THEN o.total_amount ELSE 0 END), 0)              AS total_completed,
@@ -154,7 +154,7 @@ const getRanking = async (req, res, next) => {
         MAX(o.placed_at)                 AS last_order_at,
         RANK() OVER (ORDER BY COALESCE(SUM(o.total_amount),0) DESC)::int AS rank
       FROM app.clients c
-      LEFT JOIN app.orders o ON o.client_id = c.id
+      LEFT JOIN app.orders o ON o.client_id = c.id AND o.status <> 'cancelled'
       WHERE c.is_active = true
       GROUP BY c.id
       ORDER BY total_spent DESC
@@ -243,7 +243,7 @@ const getClientStats = async (req, res, next) => {
             COALESCE(SUM(o2.total_amount), 0) AS total_spent,
             RANK() OVER (ORDER BY COALESCE(SUM(o2.total_amount),0) DESC)::int AS rank
           FROM app.clients c2
-          LEFT JOIN app.orders o2 ON o2.client_id = c2.id
+          LEFT JOIN app.orders o2 ON o2.client_id = c2.id AND o2.status <> 'cancelled'
           WHERE c2.is_active = true
           GROUP BY c2.id
         ) ranked
@@ -267,11 +267,12 @@ const getClientStats = async (req, res, next) => {
     if (!clientRows.rows[0]) return res.status(404).json({ error: 'not_found' });
 
     const orders = ordersRows.rows;
-    const totalSpent    = orders.reduce((s, o) => s + parseFloat(o.total_amount || 0), 0);
+    const nonCancelled  = orders.filter(o => o.status !== 'cancelled');
+    const totalSpent    = nonCancelled.reduce((s, o) => s + parseFloat(o.total_amount || 0), 0);
     const completedOrds = orders.filter(o => o.status === 'completed');
     const cancelledOrds = orders.filter(o => o.status === 'cancelled');
     const pendingOrds   = orders.filter(o => o.status === 'pending');
-    const avgOrder      = orders.length > 0 ? totalSpent / orders.length : 0;
+    const avgOrder      = nonCancelled.length > 0 ? totalSpent / nonCancelled.length : 0;
 
     // CA ce mois vs mois dernier
     const now      = new Date();
