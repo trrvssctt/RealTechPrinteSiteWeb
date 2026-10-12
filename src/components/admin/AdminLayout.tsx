@@ -154,7 +154,7 @@ const AdminLayout = ({ children }: { children?: any }) => {
         <div className="flex h-16 items-center px-6">
           {/* Logo Section */}
           <div className="flex items-center gap-3">
-            <Link to="/admin" className="flex items-center gap-3">
+            <Link to={isAdmin ? "/admin" : "/admin/employe"} className="flex items-center gap-3">
               <div className="w-25 h-15-lg bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shadow-sm">
           <img 
             src={logo_realtech} 
@@ -254,9 +254,9 @@ const AdminLayout = ({ children }: { children?: any }) => {
 
         {/* Mobile Bottom Navigation */}
           <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around p-2 z-40">
-          {navItems.slice(0, 4).map((item) => {
+          {filteredNavItems.slice(0, 4).map((item) => {
             const Icon = item.icon;
-            const targetPath = (item.path === '/admin' && isEmployee) ? '/admin/employer' : item.path;
+            const targetPath = (item.path === '/admin' && isEmployee) ? '/admin/employe' : item.path;
             const isActive = location.pathname === targetPath;
             
             return (

@@ -144,7 +144,9 @@ const Dashboard = () => {
       const ordersJson = await ordersResp.json().catch(() => ({ data: [] }));
       const cartsJson = await cartsResp.json().catch(() => ({ data: [] }));
 
-      const allOrders = Array.isArray(ordersJson.data) ? ordersJson.data : [];
+      // Les commandes annulées ne sont comptées nulle part dans le tableau de bord
+      const allOrders = (Array.isArray(ordersJson.data) ? ordersJson.data : [])
+        .filter((o: any) => o.status !== 'cancelled');
       const allCarts = Array.isArray(cartsJson.data) ? cartsJson.data : [];
 
       // ── Bilan journalier ────────────────────────────────────────────────────

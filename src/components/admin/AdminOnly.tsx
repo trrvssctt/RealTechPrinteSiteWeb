@@ -44,7 +44,8 @@ const AdminOnly = ({ children }: { children: ReactNode }) => {
   }
 
   if (!isAdmin) {
-    return <Navigate to="/admin" replace />;
+    // Un non-admin (employé) est renvoyé vers son propre tableau de bord
+    return <Navigate to="/admin/employe" replace />;
   }
 
   return <>{children}</>;

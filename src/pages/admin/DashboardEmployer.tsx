@@ -1,6 +1,6 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Package, ShoppingCart, DollarSign, TrendingUp, Calendar, TrendingDown, Users, ShoppingBag, Mail, ArrowUpRight, ArrowDownRight, Eye, BarChart3, Activity, Clock, CheckCircle } from "lucide-react";
+import { Package, ShoppingCart, DollarSign, TrendingUp, Calendar, TrendingDown, Users, ShoppingBag, ArrowUpRight, ArrowDownRight, Eye, BarChart3, Activity, Clock, CheckCircle } from "lucide-react";
 import { Link } from 'react-router-dom';
 import AdminLayout from '@/components/admin/AdminLayout';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -8,7 +8,6 @@ import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Cart
 import { format, subDays, startOfMonth, endOfMonth, startOfDay, endOfDay } from "date-fns";
 import { apiFetch } from '@/lib/api';
 import { fr } from "date-fns/locale";
-import { useToast } from '@/hooks/use-toast';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import logo_realtech from '../../../assets/logo_realtech.png';
@@ -44,7 +43,6 @@ const DashboardEmployer = () => {
   const [revenueData, setRevenueData] = useState<any[]>([]);
   const [ordersData, setOrdersData] = useState<any[]>([]);
   const [categoriesData, setCategoriesData] = useState<any[]>([]);
-  const [unreadMessages, setUnreadMessages] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [isEmployee, setIsEmployee] = useState(false);
   const [dailyStats, setDailyStats] = useState({
@@ -78,48 +76,6 @@ const DashboardEmployer = () => {
     };
     fetchMe();
     return () => { mounted = false; };
-  }, []);
-
-  // Poll for new contact messages and show a toast when new ones arrive
-  const lastCountRef = useRef<number | null>(null);
-  const toastHook = useToast();
-
-  useEffect(() => {
-    let stopped = false;
-    const token = localStorage.getItem('sessionToken');
-    const headers: Record<string, string> = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
-    const checkContacts = async () => {
-      try {
-        const resp = await apiFetch('/api/contacts?handled=false', { headers });
-        if (!resp.ok) return;
-        const json = await resp.json();
-        const count = Array.isArray(json.results) ? json.results.length : 0;
-        if (lastCountRef.current === null) {
-          lastCountRef.current = count;
-          setUnreadMessages(count);
-        } else if (count > lastCountRef.current) {
-          const delta = count - lastCountRef.current;
-          lastCountRef.current = count;
-          setUnreadMessages(count);
-          toastHook.toast({ 
-            title: `Nouveau${delta>1?'x':''} message${delta>1?'s':''}`,
-            description: `${delta} nouveau${delta>1?'x':''} message${delta>1?'s':''} de contact`,
-            variant: "default"
-          });
-        } else {
-          lastCountRef.current = count;
-          setUnreadMessages(count);
-        }
-      } catch (e) {
-        // ignore polling errors
-      }
-    };
-
-    checkContacts();
-    const id = setInterval(() => { if (!stopped && !document.hidden) checkContacts(); }, 30000);
-    return () => { stopped = true; clearInterval(id); };
   }, []);
 
   const getDateRange = () => {
@@ -168,7 +124,9 @@ const DashboardEmployer = () => {
       const ordersJson = await ordersResp.json().catch(() => ({ data: [] }));
       const cartsJson = await cartsResp.json().catch(() => ({ data: [] }));
 
-      const allOrders = Array.isArray(ordersJson.data) ? ordersJson.data : [];
+      // Les commandes annulées ne sont comptées nulle part dans le tableau de bord
+      const allOrders = (Array.isArray(ordersJson.data) ? ordersJson.data : [])
+        .filter((o: any) => o.status !== 'cancelled');
       const allCarts = Array.isArray(cartsJson.data) ? cartsJson.data : [];
 
       // ── Activité journalière ─────────────────────────────────────────────────
@@ -348,17 +306,7 @@ const DashboardEmployer = () => {
   const ordersChange = calculateChange(stats.totalOrders, stats.previousOrders);
   const visitsChange = calculateChange(stats.totalVisits, stats.previousVisits);
 
-  const statCards = [
-    {
-      title: "Messages non lus",
-      value: unreadMessages,
-      icon: Mail,
-      change: null,
-      color: "bg-gradient-to-br from-pink-500 to-rose-600",
-      iconColor: "text-pink-100",
-      link: "/admin/contact",
-      description: "Messages en attente"
-    },
+  const statCards: { title: string; value: string | number; icon: any; change: number | null; color: string; iconColor: string; link?: string; description: string }[] = [
     {
       title: "Visites",
       value: stats.totalVisits.toLocaleString(),
@@ -447,20 +395,6 @@ const DashboardEmployer = () => {
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Link to="/admin/messages">
-          <Card className="border-2 border-dashed border-muted hover:border-primary/50 transition-all cursor-pointer hover:shadow-md">
-            <CardContent className="p-6 flex flex-col items-center justify-center text-center">
-              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-3">
-                <Mail className="h-6 w-6 text-primary" />
-              </div>
-              <h3 className="font-semibold text-lg">Voir les Messages</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                {unreadMessages > 0 ? `${unreadMessages} non lu${unreadMessages > 1 ? 's' : ''}` : 'Aucun message'}
-              </p>
-            </CardContent>
-          </Card>
-        </Link>
-        
         <Link to="/admin/orders">
           <Card className="border-2 border-dashed border-muted hover:border-emerald-500/50 transition-all cursor-pointer hover:shadow-md">
             <CardContent className="p-6 flex flex-col items-center justify-center text-center">
