@@ -409,6 +409,8 @@ exports.updateOrder = async (req, res, next) => {
     delivered_items,  // [{product_id, quantity}] — used when delivery_status='partial'
     // Cancellation fields
     returned_items,   // [{product_id, quantity}] — stock to restore on cancel
+    // Notes internes (stockées dans metadata.sale_context.notes)
+    notes,
   } = req.body;
 
   try {
@@ -691,13 +693,27 @@ exports.updateOrder = async (req, res, next) => {
       await tx.query('UPDATE app.orders SET status = $1 WHERE id = $2', [status, id]);
     }
 
+    // Notes internes : même emplacement qu'à la création (metadata.sale_context.notes)
+    if (notes !== undefined) {
+      const cleanNotes = typeof notes === 'string' && notes.trim() ? notes.trim() : null;
+      await tx.query(
+        `UPDATE app.orders SET metadata = jsonb_set(
+           COALESCE(metadata, '{}'::jsonb),
+           '{sale_context}',
+           COALESCE(metadata->'sale_context', '{}'::jsonb) || jsonb_build_object('notes', $1::text),
+           true
+         ) WHERE id = $2`,
+        [cleanNotes, id]
+      );
+    }
+
     // Append the actor into metadata.traiter_par (jsonb array) so every update records who acted
     try {
       const actor = {
         user_id: (req.user && req.user.id) || null,
         name: (req.user && (req.user.name || req.user.email)) || null,
         roles: (req.user && req.user.roles) || null,
-        action: status || 'update',
+        action: status || (notes !== undefined ? 'notes' : 'update'),
         at: new Date().toISOString()
       };
 

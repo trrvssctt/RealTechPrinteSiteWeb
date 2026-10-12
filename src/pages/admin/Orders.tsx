@@ -90,6 +90,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+// Les notes d'une commande sont stockées dans metadata.sale_context.notes
+const getOrderNotes = (order: any): string =>
+  order?.metadata?.sale_context?.notes || order?.notes || "";
+
 const Orders = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<any[]>([]);
@@ -298,7 +302,7 @@ const Orders = () => {
   const handleViewDetails = async (order: any) => {
     setSelectedOrder(order);
     setOrderItems(order.items || order.order_items || []);
-    setNotes(order.notes || "");
+    setNotes(getOrderNotes(order));
     setDetailsOpen(true);
     // If the order was enriched with a client_record during fetchOrders, use it immediately
     if (order.client_record) {
@@ -2212,7 +2216,7 @@ const formatDate = (dateString: string) => {
                         <div className="flex justify-end gap-2">
                           <Button
                             variant="outline"
-                            onClick={() => setNotes(selectedOrder.notes || "")}
+                            onClick={() => setNotes(getOrderNotes(selectedOrder))}
                           >
                             Annuler
                           </Button>
