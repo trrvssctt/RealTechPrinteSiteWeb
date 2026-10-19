@@ -22,6 +22,7 @@ type Line = {
   name: string;
   quantity: number;
   unit_price: number;
+  purchase_price: number;
 };
 
 const STATUS_LABELS: Record<Invoice['status'], { label: string; className: string }> = {
@@ -230,7 +231,10 @@ const Invoices = () => {
     setProformaOpen(true);
     if (products.length || services.length || clients.length) return;
     const [p, s, c]: any[] = await Promise.all([
-      apiFetch('/api/products?limit=1000').then(r => (r.ok ? r.json() : {})).catch(() => ({})),
+      // Liste avec prix d'achat (calcul de la marge) ; à défaut, liste publique
+      apiFetch('/api/products/all?limit=1000')
+        .then(r => (r.ok ? r.json() : apiFetch('/api/products?limit=1000').then(r2 => (r2.ok ? r2.json() : {}))))
+        .catch(() => ({})),
       apiFetch('/api/admin/services?limit=1000').then(r => (r.ok ? r.json() : {})).catch(() => ({})),
       apiFetch('/api/admin/clients?limit=1000').then(r => (r.ok ? r.json() : {})).catch(() => ({})),
     ]);
@@ -244,10 +248,11 @@ const Invoices = () => {
     if (!q) return [];
     const prods = products
       .filter(p => (p.name || '').toLowerCase().includes(q))
-      .map(p => ({ kind: 'product' as const, id: p.id, name: p.name, price: Number(p.price || 0), extra: `Stock : ${p.stock ?? '—'}` }));
+      .filter(p => p.is_active !== false)
+      .map(p => ({ kind: 'product' as const, id: p.id, name: p.name, price: Number(p.price || 0), purchase_price: Number(p.purchase_price || 0), extra: `Stock : ${p.stock ?? '—'}` }));
     const servs = services
       .filter(s => (s.name || '').toLowerCase().includes(q))
-      .map(s => ({ kind: 'service' as const, id: s.id, name: s.name, price: Number(s.price || 0), extra: 'Service' }));
+      .map(s => ({ kind: 'service' as const, id: s.id, name: s.name, price: Number(s.price || 0), purchase_price: Number(s.purchase_price || 0), extra: 'Service' }));
     return [...prods, ...servs].slice(0, 8);
   }, [catalogSearch, products, services]);
 
@@ -261,7 +266,7 @@ const Invoices = () => {
 
   const selectedClient = clients.find(c => c.id === clientId);
 
-  const addLine = (r: { kind: 'product' | 'service'; id: string; name: string; price: number }) => {
+  const addLine = (r: { kind: 'product' | 'service'; id: string; name: string; price: number; purchase_price: number }) => {
     setLines(prev => {
       const existing = prev.find(l => (r.kind === 'product' ? l.product_id : l.service_id) === r.id);
       if (existing) return prev.map(l => (l === existing ? { ...l, quantity: l.quantity + 1 } : l));
@@ -271,19 +276,24 @@ const Invoices = () => {
         name: r.name,
         quantity: 1,
         unit_price: r.price,
+        purchase_price: r.purchase_price,
       }];
     });
     setCatalogSearch('');
   };
 
   const addFreeLine = () =>
-    setLines(prev => [...prev, { key: `free-${Date.now()}`, name: '', quantity: 1, unit_price: 0 }]);
+    setLines(prev => [...prev, { key: `free-${Date.now()}`, name: '', quantity: 1, unit_price: 0, purchase_price: 0 }]);
 
   const updateLine = (key: string, patch: Partial<Line>) =>
     setLines(prev => prev.map(l => (l.key === key ? { ...l, ...patch } : l)));
 
   const subtotal = lines.reduce((s, l) => s + l.quantity * l.unit_price, 0);
   const total = Math.max(0, subtotal - (discount || 0));
+  // Bénéfice estimé : total après remise − coût d'achat des lignes
+  const costTotal = lines.reduce((s, l) => s + l.quantity * l.purchase_price, 0);
+  const profit = total - costTotal;
+  const linesWithoutCost = lines.filter(l => !l.purchase_price).length;
 
   const saveProforma = async () => {
     if (lines.length === 0) { toast.error('Ajoutez au moins un article'); return; }
@@ -297,7 +307,7 @@ const Invoices = () => {
         body: JSON.stringify({
           client_id: clientId || undefined,
           client: clientId ? undefined : freeClient,
-          items: lines.map(l => ({ product_id: l.product_id, service_id: l.service_id, name: l.name, quantity: l.quantity, unit_price: l.unit_price })),
+          items: lines.map(l => ({ product_id: l.product_id, service_id: l.service_id, name: l.name, quantity: l.quantity, unit_price: l.unit_price, purchase_price: l.purchase_price })),
           discount,
           notes: notes || null,
         }),
@@ -341,6 +351,7 @@ const Invoices = () => {
             service_name: it.service_id ? it.name : undefined,
             quantity: it.quantity,
             unit_price: it.unit_price,
+            purchase_price: it.purchase_price || 0,
           })),
           metadata: { admin_created: true, sale_type: 'order', from_proforma: inv.invoice_number },
         }),
@@ -568,7 +579,7 @@ const Invoices = () => {
 
       {/* ── Nouvelle proforma ── */}
       <Dialog open={proformaOpen} onOpenChange={setProformaOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Nouvelle facture proforma</DialogTitle>
             <DialogDescription>Indépendante de toute commande. Elle pourra ensuite être transformée en commande.</DialogDescription>
@@ -628,8 +639,10 @@ const Invoices = () => {
                     <TableRow>
                       <TableHead>Désignation</TableHead>
                       <TableHead className="w-20">Qté</TableHead>
-                      <TableHead className="w-32">P.U.</TableHead>
+                      <TableHead className="w-32">P.U. vente</TableHead>
+                      <TableHead className="w-32">P.U. achat</TableHead>
                       <TableHead className="text-right">Total</TableHead>
+                      <TableHead className="text-right">Marge</TableHead>
                       <TableHead className="w-10"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -649,7 +662,18 @@ const Invoices = () => {
                           <Input type="number" min={0} value={l.unit_price}
                             onChange={e => updateLine(l.key, { unit_price: Math.max(0, Number(e.target.value) || 0) })} />
                         </TableCell>
+                        <TableCell>
+                          {l.product_id || l.service_id ? (
+                            <span className="text-sm text-muted-foreground whitespace-nowrap">{l.purchase_price ? formatCurrency(l.purchase_price) : '—'}</span>
+                          ) : (
+                            <Input type="number" min={0} value={l.purchase_price}
+                              onChange={e => updateLine(l.key, { purchase_price: Math.max(0, Number(e.target.value) || 0) })} />
+                          )}
+                        </TableCell>
                         <TableCell className="text-right whitespace-nowrap">{formatCurrency(l.quantity * l.unit_price)}</TableCell>
+                        <TableCell className={`text-right whitespace-nowrap ${l.unit_price < l.purchase_price ? 'text-red-600' : 'text-emerald-700'}`}>
+                          {l.purchase_price ? formatCurrency(l.quantity * (l.unit_price - l.purchase_price)) : '—'}
+                        </TableCell>
                         <TableCell>
                           <Button size="sm" variant="ghost" onClick={() => setLines(prev => prev.filter(x => x.key !== l.key))}>
                             <Trash2 className="h-4 w-4 text-red-500" />
@@ -670,6 +694,21 @@ const Invoices = () => {
               <div className="flex flex-col justify-end text-right text-sm">
                 <div className="text-muted-foreground">Sous-total : {formatCurrency(subtotal)}</div>
                 <div className="text-lg font-semibold">Total : {formatCurrency(total)}</div>
+                {lines.length > 0 && (
+                  <div className="mt-2 pt-2 border-t">
+                    <div className="text-muted-foreground">Coût d'achat : {formatCurrency(costTotal)}</div>
+                    <div className={`font-semibold ${profit < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                      Bénéfice estimé : {formatCurrency(profit)}
+                      {total > 0 && <span className="font-normal text-xs"> ({Math.round((profit / total) * 100)} %)</span>}
+                    </div>
+                    {linesWithoutCost > 0 && (
+                      <div className="text-xs text-amber-600">
+                        {linesWithoutCost} ligne{linesWithoutCost > 1 ? 's' : ''} sans prix d'achat : bénéfice surestimé
+                      </div>
+                    )}
+                    <div className="text-xs text-muted-foreground">Non imprimé sur la proforma</div>
+                  </div>
+                )}
               </div>
             </div>
 

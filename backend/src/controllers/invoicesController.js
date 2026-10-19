@@ -244,17 +244,20 @@ exports.createProforma = async (req, res, next) => {
       }
       let line;
       if (it.product_id) {
-        const { rows } = await db.query('SELECT name, price, sku FROM app.products WHERE id = $1', [it.product_id]);
+        const { rows } = await db.query('SELECT name, price, sku, purchase_price FROM app.products WHERE id = $1', [it.product_id]);
         if (!rows[0]) return res.status(400).json({ error: `Produit introuvable : ${it.product_id}` });
-        line = { product_id: it.product_id, service_id: null, name: rows[0].name, sku: rows[0].sku || null, catalog: Number(rows[0].price) };
+        line = { product_id: it.product_id, service_id: null, name: rows[0].name, sku: rows[0].sku || null, catalog: Number(rows[0].price), purchase_price: Number(rows[0].purchase_price) || 0 };
       } else if (it.service_id) {
-        const { rows } = await db.query('SELECT name, price FROM app.services WHERE id = $1', [it.service_id]);
+        const { rows } = await db.query(`SELECT name, price, COALESCE(NULLIF(purchase_price, 0), (metadata->>'purchase_price')::numeric, 0) AS purchase_price FROM app.services WHERE id = $1`, [it.service_id]);
         if (!rows[0]) return res.status(400).json({ error: `Service introuvable : ${it.service_id}` });
-        line = { product_id: null, service_id: it.service_id, name: rows[0].name, sku: 'SERVICE', catalog: Number(rows[0].price || 0) };
+        line = { product_id: null, service_id: it.service_id, name: rows[0].name, sku: 'SERVICE', catalog: Number(rows[0].price || 0), purchase_price: Number(rows[0].purchase_price) || 0 };
       } else {
         const name = (it.name || '').toString().trim();
         if (!name) return res.status(400).json({ error: 'Article sans référence ni désignation' });
-        line = { product_id: null, service_id: null, name, sku: null, catalog: 0 };
+        // Ligne libre : le prix d'achat est saisi à la main (calcul de la marge, jamais imprimé)
+        const purchase = Number(it.purchase_price || 0);
+        if (!Number.isFinite(purchase) || purchase < 0) return res.status(400).json({ error: `Prix d'achat invalide pour : ${name}` });
+        line = { product_id: null, service_id: null, name, sku: null, catalog: 0, purchase_price: round2(purchase) };
       }
       const unitPrice = it.unit_price != null && it.unit_price !== '' ? Number(it.unit_price) : line.catalog;
       if (!Number.isFinite(unitPrice) || unitPrice < 0) {

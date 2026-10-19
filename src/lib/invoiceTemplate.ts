@@ -43,7 +43,7 @@ export interface Invoice {
   converted_order_id: string | null;
   client_id: string | null;
   client: { name?: string | null; phone?: string | null; email?: string | null };
-  items: Array<{ product_id?: string | null; service_id?: string | null; name: string; sku?: string | null; quantity: number; unit_price: number; total: number }>;
+  items: Array<{ product_id?: string | null; service_id?: string | null; name: string; sku?: string | null; quantity: number; unit_price: number; total: number; purchase_price?: number }>;
   subtotal: number | string;
   discount: number | string;
   total_amount: number | string;

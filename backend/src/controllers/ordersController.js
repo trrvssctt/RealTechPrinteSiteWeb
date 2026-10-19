@@ -37,7 +37,10 @@ async function validateOrderItems(q, items, isStaff) {
       // Ligne libre sans référence catalogue : réservée au personnel
       if (!isStaff) return { error: 'Article sans référence produit ou service.' };
       unitPrice = Number(it.unit_price || it.price || 0);
-      validItems.push({ product_id: null, service_id: null, product_name: it.product_name || it.name || null, service_name: it.service_name || null, unit_price: unitPrice, quantity, catalog_price: unitPrice, purchase_price: 0 });
+      // Prix d'achat saisi à la main (ex. ligne libre d'une proforma) pour le calcul de la marge
+      const purchase = Number(it.purchase_price || 0);
+      if (!Number.isFinite(purchase) || purchase < 0) return { error: `Prix d'achat invalide pour : ${label}` };
+      validItems.push({ product_id: null, service_id: null, product_name: it.product_name || it.name || null, service_name: it.service_name || null, unit_price: unitPrice, quantity, catalog_price: unitPrice, purchase_price: purchase });
     }
 
     if (!Number.isFinite(unitPrice) || unitPrice < 0) return { error: `Prix invalide pour : ${label}` };
