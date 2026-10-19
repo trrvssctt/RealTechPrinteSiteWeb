@@ -96,6 +96,19 @@ const allowedOrigins = rawOrigins
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
+// Accepter aussi la variante www / sans www de chaque origine : le site répond sur les deux,
+// et Safari (Mac/iPhone) ouvre souvent www.realtechprint.com, ce qui bloquait la connexion.
+for (const o of [...allowedOrigins]) {
+  try {
+    const u = new URL(o);
+    if (u.hostname === 'localhost' || /^[\d.]+$/.test(u.hostname)) continue;
+    u.hostname = u.hostname.startsWith('www.') ? u.hostname.slice(4) : `www.${u.hostname}`;
+    const variant = u.origin;
+    if (!allowedOrigins.includes(variant)) allowedOrigins.push(variant);
+  } catch (e) {
+    // origine mal formée : ignorée
+  }
+}
 
 const corsOptions = {
   // handle preflight success status for older browsers
