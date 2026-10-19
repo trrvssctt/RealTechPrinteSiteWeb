@@ -162,6 +162,9 @@ const Orders = () => {
   // Versement encaissé lors de la finalisation (une commande peut être payée en plusieurs fois)
   const [completePayAmount, setCompletePayAmount] = useState<string>('');
   const [completePayMethod, setCompletePayMethod] = useState<string>('cash');
+  // Date réelle du versement (permet de saisir d'anciennes commandes déjà payées)
+  const todayStr = () => new Date().toLocaleDateString('en-CA');
+  const [completePayDate, setCompletePayDate] = useState<string>(todayStr());
   const [completeDelivery, setCompleteDelivery] = useState<'full' | 'partial' | 'none'>('full');
   const [completeDeliveredQtys, setCompleteDeliveredQtys] = useState<Record<string, number>>({});
   const [completing, setCompleting] = useState(false);
@@ -369,6 +372,7 @@ const Orders = () => {
     const remaining = Math.max(0, Number(order.total_amount || 0) - Number(order.amount_paid || 0));
     setCompletePayAmount(String(remaining));
     setCompletePayMethod(order.metadata?.sale_context?.payment_method || 'cash');
+    setCompletePayDate(todayStr());
     const { fullyDelivered } = deliveryProgress(order);
     setCompleteDelivery(fullyDelivered ? 'full' : prevDelivery?.delivery_status === 'partial' ? 'partial' : 'full');
     const qtys: Record<string, number> = {};
@@ -414,6 +418,7 @@ const Orders = () => {
         delivery_status: completeDelivery,
         payment_amount: Number(completePayAmount) || 0,
         payment_method: completePayMethod,
+        payment_date: completePayDate || undefined,
       };
       if (completeDelivery === 'partial') {
         body.delivered_items = Object.entries(completeDeliveredQtys)
@@ -1198,6 +1203,16 @@ const formatDate = (dateString: string) => {
                           <SelectItem value="card">Carte bancaire</SelectItem>
                         </SelectContent>
                       </Select>
+                    </div>
+                  )}
+                  {completePayNow > 0 && (
+                    <div>
+                      <Label htmlFor="pay-date" className="text-xs text-muted-foreground">Date du paiement perçu</Label>
+                      <Input id="pay-date" type="date" className="mt-1" max={todayStr()} value={completePayDate}
+                        onChange={e => setCompletePayDate(e.target.value)} />
+                      {completePayDate && completePayDate < todayStr() && (
+                        <p className="text-xs text-muted-foreground mt-1">Paiement antérieur : enregistré à la date choisie.</p>
+                      )}
                     </div>
                   )}
                 </div>

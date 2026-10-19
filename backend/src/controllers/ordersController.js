@@ -409,6 +409,7 @@ exports.updateOrder = async (req, res, next) => {
     delivery_status,  // 'full' | 'partial' | 'none'
     payment_amount,   // montant encaissé lors de cette finalisation (versement)
     payment_method,   // 'cash' | 'wave' | 'transfer' | 'card'
+    payment_date,     // 'YYYY-MM-DD' : date réelle du versement (saisie d'anciennes commandes)
     delivered_items,  // [{product_id, quantity}] — used when delivery_status='partial'
     // Cancellation fields
     returned_items,   // [{product_id, quantity}] — stock to restore on cancel
@@ -454,11 +455,25 @@ exports.updateOrder = async (req, res, next) => {
         await tx.query('ROLLBACK');
         return res.status(400).json({ error: `Le montant encaissé dépasse le reste à payer (${round2(total - paidBefore)} FCFA)` });
       }
+      // Date du versement : aujourd'hui par défaut, ou une date passée pour les anciennes commandes
+      let paidAt = null; // null → now()
+      if (payment_date) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(payment_date)) || Number.isNaN(Date.parse(payment_date))) {
+          await tx.query('ROLLBACK');
+          return res.status(400).json({ error: 'Date de paiement invalide' });
+        }
+        const today = new Date().toISOString().slice(0, 10);
+        if (payment_date > today) {
+          await tx.query('ROLLBACK');
+          return res.status(400).json({ error: 'La date de paiement ne peut pas être dans le futur' });
+        }
+        if (payment_date < today) paidAt = `${payment_date} 12:00`;
+      }
       if (payNow > 0) {
         await tx.query(
           `INSERT INTO app.payments (order_id, provider, amount, status, paid_at, created_by)
-           VALUES ($1, $2, $3, 'paid', now(), $4)`,
-          [id, payment_method || null, payNow, (req.user && req.user.id) || null]
+           VALUES ($1, $2, $3, 'paid', COALESCE($5::timestamptz, now()), $4)`,
+          [id, payment_method || null, payNow, (req.user && req.user.id) || null, paidAt]
         );
       }
       const amountPaid = round2(paidBefore + payNow);
@@ -561,10 +576,10 @@ exports.updateOrder = async (req, res, next) => {
       if (targetStatus === 'completed') {
         await tx.query(
           `UPDATE app.orders
-              SET status = 'completed', completed_at = now(),
+              SET status = 'completed', completed_at = COALESCE($3::timestamptz, now()),
                   metadata = jsonb_set(COALESCE(metadata,'{}'), '{delivery}', $1::jsonb, true)
             WHERE id = $2`,
-          [JSON.stringify(deliveryMeta), id]
+          [JSON.stringify(deliveryMeta), id, payNow > 0 ? paidAt : null]
         );
       } else {
         await tx.query(
