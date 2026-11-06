@@ -42,7 +42,7 @@ export interface Invoice {
   order_id: string | null;
   converted_order_id: string | null;
   client_id: string | null;
-  client: { name?: string | null; phone?: string | null; email?: string | null };
+  client: { name?: string | null; phone?: string | null; email?: string | null; address?: string | null };
   items: Array<{ product_id?: string | null; service_id?: string | null; name: string; sku?: string | null; quantity: number; unit_price: number; total: number; purchase_price?: number }>;
   subtotal: number | string;
   discount: number | string;
@@ -204,6 +204,7 @@ export function buildInvoiceHTML(invoice: Invoice): string {
   const clientName = invoice.client?.name || 'Client';
   const clientPhone = invoice.client?.phone || '';
   const clientEmail = invoice.client?.email || '';
+  const clientAddress = invoice.client?.address || '';
 
   const items = invoice.items || [];
   const itemsSum = Number(invoice.subtotal) || items.reduce((s, it) => s + Number(it.total || 0), 0);
@@ -291,6 +292,7 @@ ${DOC_CSS}
       ${clientPhone ? `Tél : ${esc(clientPhone)}` : ''}
       ${clientPhone && clientEmail ? ' — ' : ''}
       ${clientEmail ? `Email : ${esc(clientEmail)}` : ''}
+      ${clientAddress ? `<div>Adresse : ${esc(clientAddress)}</div>` : ''}
     </div>
 
     <table class="items">

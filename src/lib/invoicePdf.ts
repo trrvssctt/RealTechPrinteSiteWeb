@@ -102,9 +102,16 @@ export async function downloadHtmlAsPdf(html: string, filename: string): Promise
   }
 }
 
-// Facture en PDF (cachet de l'entreprise en option, ex. commande terminée)
-export async function downloadInvoicePdf(invoice: Invoice, opts: { stamp?: boolean } = {}): Promise<void> {
-  const stampHtml = opts.stamp
+// Cachet de l'entreprise : proformas non annulées et factures définitives de commande terminée
+function hasStamp(invoice: Invoice): boolean {
+  if (invoice.invoice_type === 'proforma') return invoice.status !== 'cancelled';
+  const orderStatus = invoice.order_state?.order_status || invoice.order_status;
+  return invoice.invoice_type === 'definitive' && orderStatus === 'completed';
+}
+
+// Facture en PDF
+export async function downloadInvoicePdf(invoice: Invoice): Promise<void> {
+  const stampHtml = hasStamp(invoice)
     ? `<div class="stamp"><img src="${cachetUrl}" alt="cachet"/></div>`
     : '';
   const html = buildInvoiceHTML(invoice).replace('<div class="invoice-footer">', stampHtml + '<div class="invoice-footer">');

@@ -58,7 +58,7 @@ const Invoices = () => {
   const [services, setServices] = useState<any[]>([]);
   const [clientId, setClientId] = useState<string>('');
   const [clientSearch, setClientSearch] = useState('');
-  const [freeClient, setFreeClient] = useState({ name: '', phone: '', email: '' });
+  const [freeClient, setFreeClient] = useState({ name: '', phone: '', email: '', address: '' });
   const [catalogSearch, setCatalogSearch] = useState('');
   const [lines, setLines] = useState<Line[]>([]);
   const [discount, setDiscount] = useState(0);
@@ -110,11 +110,8 @@ const Invoices = () => {
       || (inv.client?.phone || '').includes(q));
   }, [invoices, search]);
 
-  // Cachet sur les factures définitives dont la commande est terminée
   const downloadFull = async (id: string) => {
-    const full = await fetchInvoice(id);
-    const orderStatus = full.order_state?.order_status || full.order_status;
-    await downloadInvoicePdf(full, { stamp: full.invoice_type === 'definitive' && orderStatus === 'completed' });
+    await downloadInvoicePdf(await fetchInvoice(id));
   };
 
   const printInvoice = async (inv: Invoice) => {
@@ -223,7 +220,7 @@ const Invoices = () => {
   const openProforma = async () => {
     setClientId('');
     setClientSearch('');
-    setFreeClient({ name: '', phone: '', email: '' });
+    setFreeClient({ name: '', phone: '', email: '', address: '' });
     setCatalogSearch('');
     setLines([]);
     setDiscount(0);
@@ -342,6 +339,7 @@ const Invoices = () => {
           customer_name: inv.client?.name || null,
           customer_phone: inv.client?.phone || null,
           customer_email: inv.client?.email || null,
+          customer_address: inv.client?.address || null,
           discount: Number(inv.discount || 0),
           notes: inv.notes || null,
           items: inv.items.map(it => ({
@@ -611,6 +609,7 @@ const Invoices = () => {
                     <Input placeholder="Nom" value={freeClient.name} onChange={e => setFreeClient({ ...freeClient, name: e.target.value })} />
                     <Input placeholder="Téléphone" value={freeClient.phone} onChange={e => setFreeClient({ ...freeClient, phone: e.target.value })} />
                     <Input placeholder="Email (facultatif)" value={freeClient.email} onChange={e => setFreeClient({ ...freeClient, email: e.target.value })} />
+                    <Input className="sm:col-span-3" placeholder="Adresse (facultatif)" value={freeClient.address} onChange={e => setFreeClient({ ...freeClient, address: e.target.value })} />
                   </div>
                 </>
               )}

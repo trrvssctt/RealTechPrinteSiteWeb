@@ -56,6 +56,7 @@ exports.createOrder = async (req, res, next) => {
       customer_name,
       customer_phone,
       customer_email,
+      customer_address,
       items,
       total_amount,
       shipping_address,
@@ -116,7 +117,7 @@ exports.createOrder = async (req, res, next) => {
       // create client with channel = site_web or manual
       try {
         const channel = isDirectSale ? 'manual' : 'site_web';
-        client = await clientModel.createClient({ full_name: customer_name || null, email: customer_email || null, phone: customer_phone || null, created_by_channel: channel });
+        client = await clientModel.createClient({ full_name: customer_name || null, email: customer_email || null, phone: customer_phone || null, created_by_channel: channel, metadata: customer_address ? { address: customer_address } : {} });
       } catch (e) {
         console.error('client create error', e);
         client = null;
@@ -162,7 +163,7 @@ exports.createOrder = async (req, res, next) => {
     // store customer info + sale context in metadata
     await tx.query(
       `UPDATE app.orders SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), $1, $2::jsonb, true) WHERE id = $3`,
-      ['{customer}', JSON.stringify({ name: customer_name || null, phone: customer_phone || null, email: customer_email || null }), orderId]
+      ['{customer}', JSON.stringify({ name: customer_name || null, phone: customer_phone || null, email: customer_email || null, address: customer_address || null }), orderId]
     );
     // store sale_type, payment_method, discount, notes
     const saleContext = {

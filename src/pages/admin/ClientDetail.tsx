@@ -17,7 +17,7 @@ import { apiFetch } from '@/lib/api';
 import { format, formatDistanceToNow } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import {
-  ArrowLeft, RefreshCw, User, Mail, Phone, ShoppingCart,
+  ArrowLeft, RefreshCw, User, Mail, Phone, MapPin, ShoppingCart,
   TrendingUp, TrendingDown, Package, CheckCircle2, XCircle,
   Clock, Trophy, Star, BarChart3, ChevronDown, ChevronUp,
   Edit, Trash2, AlertTriangle, Calendar, Minus, ShieldCheck, ShieldAlert, FileText, Download, Wallet, Loader2,
@@ -69,7 +69,7 @@ const ClientDetail = () => {
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [editOpen, setEditOpen]   = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [editForm, setEditForm]   = useState({ full_name: '', email: '', phone: '' });
+  const [editForm, setEditForm]   = useState({ full_name: '', email: '', phone: '', address: '' });
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   // Facture toujours recalculée depuis la commande au moment de l'impression
@@ -77,8 +77,7 @@ const ClientDetail = () => {
     setDownloadingId(inv.id);
     try {
       const full = await fetchInvoice(inv.id);
-      const orderStatus = full.order_state?.order_status || full.order_status;
-      await downloadInvoicePdf(full, { stamp: full.invoice_type === 'definitive' && orderStatus === 'completed' });
+      await downloadInvoicePdf(full);
     } catch (err: any) {
       toast.error('Erreur PDF : ' + (err.message || 'erreur'));
     } finally {
@@ -118,7 +117,7 @@ const ClientDetail = () => {
   // automatique, qui écraserait la saisie en cours).
   const openEdit = useCallback(() => {
     const c = data?.client;
-    setEditForm({ full_name: c?.full_name || '', email: c?.email || '', phone: c?.phone || '' });
+    setEditForm({ full_name: c?.full_name || '', email: c?.email || '', phone: c?.phone || '', address: c?.metadata?.address || '' });
     setEditOpen(true);
   }, [data?.client]);
 
@@ -270,6 +269,7 @@ const ClientDetail = () => {
                 {[
                   { icon: Mail,     val: client.email || '—' },
                   { icon: Phone,    val: client.phone || '—' },
+                  { icon: MapPin,   val: client.metadata?.address || 'Adresse non renseignée' },
                   { icon: Calendar, val: client.created_at ? `Depuis le ${format(new Date(client.created_at), 'dd/MM/yyyy')}` : '—' },
                 ].map(({ icon: Icon, val }) => (
                   <div key={val} className="flex items-center gap-2 text-gray-600">
@@ -692,6 +692,7 @@ const ClientDetail = () => {
               { id: 'fn',  label: 'Nom complet *', field: 'full_name', type: 'text' },
               { id: 'em',  label: 'Email',        field: 'email',     type: 'email' },
               { id: 'ph',  label: 'Téléphone',    field: 'phone',     type: 'tel' },
+              { id: 'ad',  label: 'Adresse',      field: 'address',   type: 'text' },
             ].map(({ id: fid, label, field, type }) => (
               <div key={fid}>
                 <Label htmlFor={fid} className="text-sm">{label}</Label>

@@ -68,7 +68,7 @@ async function computeFromOrder(orderId) {
 
   let clientRec = null;
   if (order.client_id) {
-    const cr = await db.query('SELECT full_name, phone, email FROM app.clients WHERE id = $1', [order.client_id]);
+    const cr = await db.query('SELECT full_name, phone, email, metadata FROM app.clients WHERE id = $1', [order.client_id]);
     clientRec = cr.rows[0] || null;
   }
   const customer = order.metadata?.customer || {};
@@ -83,6 +83,7 @@ async function computeFromOrder(orderId) {
         name: clientRec?.full_name || customer.name || null,
         phone: clientRec?.phone || customer.phone || null,
         email: clientRec?.email || customer.email || null,
+        address: clientRec?.metadata?.address || customer.address || null,
       },
       items,
       subtotal: round2(items.reduce((s, it) => s + it.total, 0)),
@@ -99,6 +100,12 @@ async function computeFromOrder(orderId) {
 // Recalcule une facture liée à une commande et met à jour sa copie en base
 // (utile pour la recherche et les filtres). Proforma : renvoyée telle quelle.
 async function refreshInvoice(row) {
+  // Proforma figée : seule l'adresse manquante est reprise de la fiche client (anciennes proformas)
+  if (row.invoice_type === 'proforma' && row.client_id && !row.client?.address) {
+    const { rows: cr } = await db.query('SELECT metadata FROM app.clients WHERE id = $1', [row.client_id]);
+    const address = cr[0]?.metadata?.address;
+    return address ? { ...row, client: { ...row.client, address } } : row;
+  }
   if (!row.order_id || row.invoice_type === 'proforma') return row;
   const computed = await computeFromOrder(row.order_id);
   if (!computed) return row; // commande supprimée : dernière version connue
@@ -147,7 +154,8 @@ async function queryInvoices({ type, status, order_id, client_id, q, limit = 200
                    ELSE jsonb_build_object(
                      'name',  COALESCE(c.full_name, o.metadata->'customer'->>'name', i.client->>'name'),
                      'phone', COALESCE(c.phone,     o.metadata->'customer'->>'phone', i.client->>'phone'),
-                     'email', COALESCE(c.email,     o.metadata->'customer'->>'email', i.client->>'email'))
+                     'email', COALESCE(c.email,     o.metadata->'customer'->>'email', i.client->>'email'),
+                     'address', COALESCE(c.metadata->>'address', o.metadata->'customer'->>'address', i.client->>'address'))
               END AS client
          FROM app.invoices i
          LEFT JOIN app.orders o ON o.id = i.order_id AND i.invoice_type <> 'proforma'
@@ -229,7 +237,7 @@ exports.createFromOrder = async (req, res, next) => {
 };
 
 // POST /api/admin/invoices/proforma
-// { client_id?, client?: {name, phone, email}, items: [{product_id|service_id|name, quantity, unit_price?}], discount?, notes? }
+// { client_id?, client?: {name, phone, email, address}, items: [{product_id|service_id|name, quantity, unit_price?}], discount?, notes? }
 // Indépendante de toute commande ; le stock n'est vérifié qu'à la transformation en commande.
 exports.createProforma = async (req, res, next) => {
   try {
@@ -275,13 +283,14 @@ exports.createProforma = async (req, res, next) => {
       name: req.body.client?.name || null,
       phone: req.body.client?.phone || null,
       email: req.body.client?.email || null,
+      address: String(req.body.client?.address || '').trim() || null,
     };
     let clientId = null;
     if (client_id) {
-      const cr = await db.query('SELECT id, full_name, phone, email FROM app.clients WHERE id = $1', [client_id]);
+      const cr = await db.query('SELECT id, full_name, phone, email, metadata FROM app.clients WHERE id = $1', [client_id]);
       if (!cr.rows[0]) return res.status(400).json({ error: 'Client introuvable' });
       clientId = cr.rows[0].id;
-      client = { name: cr.rows[0].full_name, phone: cr.rows[0].phone, email: cr.rows[0].email };
+      client = { name: cr.rows[0].full_name, phone: cr.rows[0].phone, email: cr.rows[0].email, address: cr.rows[0].metadata?.address || null };
     }
     if (!client.name && !client.phone) return res.status(400).json({ error: 'Nom ou téléphone du client requis' });
 

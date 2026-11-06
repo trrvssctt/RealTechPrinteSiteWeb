@@ -65,7 +65,7 @@ const getClient = async (req, res, next) => {
 
 const createClient = async (req, res, next) => {
   try {
-    const { full_name, email, phone, created_by_channel, metadata } = req.body;
+    const { full_name, email, phone, created_by_channel, metadata, address } = req.body;
     if (!full_name) return res.status(400).json({ error: 'full_name required' });
     if (!phone || !String(phone).trim()) return res.status(400).json({ error: 'phone required' });
 
@@ -80,7 +80,10 @@ const createClient = async (req, res, next) => {
       if (existingByPhone) return res.status(409).json({ error: 'phone already exists' });
     }
     const created_by_user = req.user?.id || null;
-    const client = await clientModel.createClient({ full_name, email, phone, created_by_channel, metadata, created_by_user });
+    // L'adresse est conservée dans metadata.address (reprise sur les factures et proformas)
+    const cleanAddress = String(address || '').trim();
+    const clientMetadata = { ...(metadata || {}), ...(cleanAddress ? { address: cleanAddress } : {}) };
+    const client = await clientModel.createClient({ full_name, email, phone, created_by_channel, metadata: clientMetadata, created_by_user });
     res.status(201).json({ client });
     setImmediate(() => n8n.notifyClientCreated(client, req.user?.full_name || req.user?.email).catch(() => {}));
   } catch (err) {
@@ -99,6 +102,15 @@ const updateClient = async (req, res, next) => {
     }
     if ('full_name' in payload && !String(payload.full_name || '').trim()) {
       return res.status(400).json({ error: 'Le nom du client est obligatoire.' });
+    }
+    // Adresse : fusionnée dans metadata sans écraser les autres clés
+    if ('address' in payload) {
+      const existing = await clientModel.getClientById(id);
+      if (!existing) return res.status(404).json({ error: 'Client introuvable.' });
+      const { address: _old, ...rest } = { ...existing.metadata, ...(payload.metadata || {}) };
+      const cleanAddress = String(payload.address || '').trim();
+      payload.metadata = cleanAddress ? { ...rest, address: cleanAddress } : rest;
+      delete payload.address;
     }
     // attach updater id when available
     payload.updated_by_user = req.user?.id || null;
