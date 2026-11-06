@@ -268,10 +268,11 @@ exports.listOrders = async (req, res, next) => {
   try {
     const { client_id, email } = req.query;
     let q = `SELECT o.*, ${paidSql('o')} AS amount_paid,
-             COALESCE(jsonb_agg((to_jsonb(oi) - 'order_id') || jsonb_build_object('sku', p.sku) ORDER BY oi.id) FILTER (WHERE oi.id IS NOT NULL), '[]') AS items
+             COALESCE(jsonb_agg((to_jsonb(oi) - 'order_id') || jsonb_build_object('sku', p.sku, 'category_name', cat.name) ORDER BY oi.id) FILTER (WHERE oi.id IS NOT NULL), '[]') AS items
              FROM app.orders o
              LEFT JOIN app.order_items oi ON oi.order_id = o.id
-             LEFT JOIN app.products p ON p.id = oi.product_id`;
+             LEFT JOIN app.products p ON p.id = oi.product_id
+             LEFT JOIN app.categories cat ON cat.id = p.category_id`;
     const where = [];
     const params = [];
     if (client_id) {

@@ -13,7 +13,7 @@ const trackVisit = async (req, res, next) => {
 
 const listVisits = async (req, res, next) => {
   try {
-    const { start, end, limit = 100, offset = 0 } = req.query;
+    const { start, end, limit = 100, offset = 0, public: publicOnly } = req.query;
     // build where clause
     const where = ['action = $1'];
     const params = ['visit'];
@@ -29,10 +29,18 @@ const listVisits = async (req, res, next) => {
       idx++;
     }
 
+    // public=1 : hors pages d'administration (navigation du personnel)
+    if (publicOnly === '1') where.push(`COALESCE(payload::jsonb->>'page_path', '') NOT LIKE '/admin%'`);
+
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    const countRes = await db.query(`SELECT COUNT(*)::int AS count FROM app.audit_logs ${whereSql}`, params);
+    const countRes = await db.query(
+      `SELECT COUNT(*)::int AS count, COUNT(DISTINCT payload::jsonb->>'session_id')::int AS unique_count
+         FROM app.audit_logs ${whereSql}`,
+      params
+    );
     const count = countRes.rows[0]?.count || 0;
+    const unique_count = countRes.rows[0]?.unique_count || 0;
 
     // fetch rows with pagination, parse payload JSON
     const fetchSql = `SELECT id, user_id, action, payload, created_at FROM app.audit_logs ${whereSql} ORDER BY created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`;
@@ -45,7 +53,7 @@ const listVisits = async (req, res, next) => {
       return { id: r.id, user_id: r.user_id, action: r.action, payload, created_at: r.created_at };
     });
 
-    res.json({ data, count });
+    res.json({ data, count, unique_count });
   } catch (err) {
     next(err);
   }
