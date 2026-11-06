@@ -4,15 +4,14 @@ import { Package, ShoppingCart, DollarSign, TrendingUp, Calendar, TrendingDown, 
 import { Link } from 'react-router-dom';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { format, subDays, startOfMonth, endOfMonth, startOfDay, endOfDay } from "date-fns";
+import { differenceInHours, format, startOfDay, endOfDay } from "date-fns";
+import { buildSeries, categoryBreakdown, getPeriod, isSiteOrder, orderDate, sumRevenue, topCategories, type TimeFilter } from "@/lib/dashboardStats";
 import { apiFetch } from '@/lib/api';
 import { fr } from "date-fns/locale";
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import logo_realtech from '../../../assets/logo_realtech.png';
-
-type TimeFilter = "today" | "7days" | "30days" | "month" | "all";
 
 const CHART_COLORS = {
   primary: "hsl(214 100% 41%)",
@@ -24,6 +23,15 @@ const CHART_COLORS = {
   danger: "hsl(0 84% 60%)",
   info: "hsl(199 89% 48%)",
 };
+
+const CATEGORY_COLORS = [
+  CHART_COLORS.primary,
+  CHART_COLORS.success,
+  CHART_COLORS.warning,
+  CHART_COLORS.danger,
+  CHART_COLORS.info,
+  CHART_COLORS.muted,
+];
 
 const Dashboard = () => {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("30days");
@@ -98,51 +106,43 @@ const Dashboard = () => {
     return () => { stopped = true; clearInterval(id); };
   }, []);
 
-  const getDateRange = () => {
-    const now = new Date();
-    switch (timeFilter) {
-      case "today":
-        return { start: startOfDay(now), end: endOfDay(now) };
-      case "7days":
-        return { start: subDays(now, 7), end: now };
-      case "30days":
-        return { start: subDays(now, 30), end: now };
-      case "month":
-        return { start: startOfMonth(now), end: endOfMonth(now) };
-      default:
-        return { start: new Date(0), end: now };
+  // Visiteurs uniques du site (pages d'administration exclues)
+  const fetchVisitors = async (start: Date, end: Date, headers: Record<string, string>) => {
+    try {
+      const resp = await apiFetch(`/api/admin/visits?start=${start.toISOString()}&end=${end.toISOString()}&public=1&limit=1`, { headers });
+      if (!resp.ok) return 0;
+      return (await resp.json()).unique_count || 0;
+    } catch (e) {
+      return 0;
     }
   };
 
   const fetchStats = async () => {
     setLoading(true);
     try {
-      const { start, end } = getDateRange();
-      const startISO = start.toISOString();
-      const endISO = end.toISOString();
-
-      // Calculer la période précédente pour les comparaisons
-      const duration = end.getTime() - start.getTime();
-      const previousStart = new Date(start.getTime() - duration);
-      const previousEnd = start;
+      const period = getPeriod(timeFilter);
+      const inRange = (o: any, start: Date, end: Date) => {
+        const d = orderDate(o);
+        return d >= start && d <= end;
+      };
 
       const token = localStorage.getItem('sessionToken');
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      // Fetch products (public)
-      const productsResp = await apiFetch('/api/products');
-      const productsJson = await productsResp.json().catch(() => ({ data: [] }));
-      const productsCount = Array.isArray(productsJson.data) ? productsJson.data.length : 0;
-
-      // Fetch admin orders and carts (may require token)
-      const [ordersResp, cartsResp] = await Promise.all([
+      const [productsResp, ordersResp, cartsResp] = await Promise.all([
+        apiFetch('/api/products/all?limit=1000', { headers }),
         apiFetch('/api/admin/orders', { headers }),
         apiFetch('/api/admin/carts', { headers }),
       ]);
+      if (!ordersResp.ok) throw new Error(`Commandes : HTTP ${ordersResp.status}`);
 
+      const productsJson = await productsResp.json().catch(() => ({ data: [] }));
       const ordersJson = await ordersResp.json().catch(() => ({ data: [] }));
       const cartsJson = await cartsResp.json().catch(() => ({ data: [] }));
+
+      const productsCount = (Array.isArray(productsJson.data) ? productsJson.data : [])
+        .filter((p: any) => p.is_active !== false).length;
 
       // Les commandes annulées ne sont comptées nulle part dans le tableau de bord
       const allOrders = (Array.isArray(ordersJson.data) ? ordersJson.data : [])
@@ -150,19 +150,9 @@ const Dashboard = () => {
       const allCarts = Array.isArray(cartsJson.data) ? cartsJson.data : [];
 
       // ── Bilan journalier ────────────────────────────────────────────────────
-      const todayISO = format(new Date(), 'yyyy-MM-dd');
-      const todayStart = startOfDay(new Date());
-      const todayEnd = endOfDay(new Date());
-
-      const todayCompletedOrders = allOrders.filter((o: any) => {
-        const d = new Date(o.created_at || o.placed_at || o.createdAt);
-        return d >= todayStart && d <= todayEnd && o.status === 'completed';
-      });
-      const todayRevenueBilan = todayCompletedOrders.reduce((sum: number, o: any) => sum + Number(o.total_amount || 0), 0);
-      const todayOrdersCountBilan = allOrders.filter((o: any) => {
-        const d = new Date(o.created_at || o.placed_at || o.createdAt);
-        return d >= todayStart && d <= todayEnd;
-      }).length;
+      const now = new Date();
+      const todayISO = format(now, 'yyyy-MM-dd');
+      const todayOrders = allOrders.filter((o: any) => inRange(o, startOfDay(now), endOfDay(now)));
 
       let todayDepensesValidees = 0;
       let todayDepensesEnAttente = 0;
@@ -177,153 +167,78 @@ const Dashboard = () => {
       } catch (e) { /* ignore */ }
 
       setDailyStats({
-        todayRevenue: todayRevenueBilan,
+        todayRevenue: sumRevenue(todayOrders),
         todayDepensesValidees,
         todayDepensesEnAttente,
-        todayOrdersCount: todayOrdersCountBilan,
+        todayOrdersCount: todayOrders.length,
       });
       // ────────────────────────────────────────────────────────────────────────
 
       // Filtrer par période
-      const ordersInRange = allOrders.filter((o: any) => {
-        const dateStr = o.created_at || o.placed_at || o.createdAt;
-        const d = new Date(dateStr);
-        return d >= start && d <= end;
-      });
-      const ordersPrevious = allOrders.filter((o: any) => {
-        const dateStr = o.created_at || o.placed_at || o.createdAt;
-        const d = new Date(dateStr);
-        return d >= previousStart && d < previousEnd;
-      });
+      const ordersInRange = allOrders.filter((o: any) => inRange(o, period.start, period.end));
+      const ordersPrevious = period.previous
+        ? allOrders.filter((o: any) => inRange(o, period.previous!.start, period.previous!.end) && orderDate(o) < period.previous!.end)
+        : [];
 
-      // Only count revenue from orders that are completed
-      const revenue = ordersInRange
-        .filter((order: any) => order.status === 'completed')
-        .reduce((sum: number, order: any) => sum + Number(order.total_amount || 0), 0);
-
-      const previousRevenue = ordersPrevious
-        .filter((order: any) => order.status === 'completed')
-        .reduce((sum: number, order: any) => sum + Number(order.total_amount || 0), 0);
-
-      // Paniers: considérer last_activity_at si disponible, sinon updated_at
-      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-      const abandonedCarts = allCarts.filter((c: any) => {
+      // Mêmes règles que la page Paniers : uniquement les paniers encore actifs
+      const openCarts = allCarts.filter((c: any) => c.status === 'active');
+      const abandonedCarts = openCarts.filter((c: any) => {
         const last = c.last_activity_at || c.updated_at || c.updatedAt;
-        if (!last) return false;
-        return new Date(last) < twoHoursAgo;
+        return !!last && differenceInHours(now, new Date(last)) > 2;
       }).length;
-      const activeCarts = Math.max((allCarts.length || 0) - abandonedCarts, 0);
+      const activeCarts = openCarts.length - abandonedCarts;
 
-      // Visits: fetch current and previous period counts from analytics endpoints
-      let visitsCount = 0;
-      let previousVisitsCount = 0;
-      try {
-        const visitsResp = await apiFetch(`/api/admin/visits?start=${startISO}&end=${endISO}`, { headers });
-        if (visitsResp.ok) {
-          const vjson = await visitsResp.json();
-          visitsCount = vjson.count ?? (Array.isArray(vjson.data) ? vjson.data.length : 0);
-        } else {
-          const v2 = await apiFetch(`/api/analytics_visits?start=${startISO}&end=${endISO}`);
-          if (v2.ok) {
-            const vjson2 = await v2.json();
-            visitsCount = vjson2.count ?? (Array.isArray(vjson2.data) ? vjson2.data.length : 0);
-          }
-        }
-      } catch (e) {
-        // ignore
-      }
+      const [totalVisits, previousVisits] = await Promise.all([
+        fetchVisitors(period.start, period.end, headers),
+        period.previous ? fetchVisitors(period.previous.start, period.previous.end, headers) : Promise.resolve(0),
+      ]);
 
-      try {
-        const prevStartISO = previousStart.toISOString();
-        const prevEndISO = previousEnd.toISOString();
-        const prevResp = await apiFetch(`/api/admin/visits?start=${prevStartISO}&end=${prevEndISO}`, { headers });
-        if (prevResp.ok) {
-          const pj = await prevResp.json();
-          previousVisitsCount = pj.count ?? (Array.isArray(pj.data) ? pj.data.length : 0);
-        } else {
-          const p2 = await apiFetch(`/api/analytics_visits?start=${prevStartISO}&end=${prevEndISO}`);
-          if (p2.ok) {
-            const pj2 = await p2.json();
-            previousVisitsCount = pj2.count ?? (Array.isArray(pj2.data) ? pj2.data.length : 0);
-          }
-        }
-      } catch (e) {
-        // ignore
-      }
+      // Conversion : commandes passées sur le site / visiteurs (les saisies du personnel n'en sont pas)
+      const siteOrders = ordersInRange.filter(isSiteOrder).length;
+      const conversionRate = totalVisits > 0 ? Math.round((siteOrders / totalVisits) * 1000) / 10 : 0;
 
-      const totalVisits = visitsCount || 0;
-      const totalOrders = allOrders.length;
-      const conversionRate = totalVisits > 0 ? Math.round((totalOrders / totalVisits) * 100) : 0;
-
-      // Préparer les données pour les graphiques
-      const dailyRevenue = new Map<string, number>();
-      const dailyOrders = new Map<string, number>();
-
-      ordersInRange.forEach((order: any) => {
-        const dateStr = order.created_at || order.placed_at || order.createdAt;
-        const date = format(new Date(dateStr), 'dd/MM', { locale: fr });
-        dailyRevenue.set(date, (dailyRevenue.get(date) || 0) + Number(order.total_amount || 0));
-        dailyOrders.set(date, (dailyOrders.get(date) || 0) + 1);
-      });
-
-      const revenueChartData = Array.from(dailyRevenue.entries()).map(([date, amount]) => ({ 
-        date, 
-        montant: Math.round(amount),
-        name: date
-      })).sort((a, b) => a.date.localeCompare(b.date));
-
-      const ordersChartData = Array.from(dailyOrders.entries()).map(([date, count]) => ({ 
-        date, 
-        commandes: count,
-        name: date 
-      })).sort((a, b) => a.date.localeCompare(b.date));
-
-      // Catégories: agréger depuis les order_items
-      const categoryMap = new Map<string, number>();
-      ordersInRange.forEach((order: any) => {
-        const items = order.order_items || order.items || [];
-        items.forEach((item: any) => {
-          const categoryName = item.category_name || (item.product && item.product.category) || 'Non catégorisé';
-          const price = Number(item.total_price || item.unit_price || 0);
-          categoryMap.set(categoryName, (categoryMap.get(categoryName) || 0) + price * (item.quantity || 1));
-        });
-      });
-
-      const categoriesChartData = Array.from(categoryMap.entries())
-        .map(([name, value]) => ({ name, value: Math.round(value) }))
-        .sort((a, b) => b.value - a.value);
+      const series = buildSeries(ordersInRange, period, timeFilter === 'all');
 
       setStats({
-        totalProducts: productsCount || 0,
-        totalOrders: totalOrders || 0,
-        totalRevenue: revenue,
-        pendingOrders: allOrders.filter((o: any) => o.status === 'pending').length || 0,
-        previousRevenue,
-        previousOrders: ordersPrevious.length || 0,
+        totalProducts: productsCount,
+        totalOrders: ordersInRange.length,
+        totalRevenue: sumRevenue(ordersInRange),
+        pendingOrders: allOrders.filter((o: any) => o.status === 'pending').length,
+        previousRevenue: sumRevenue(ordersPrevious),
+        previousOrders: ordersPrevious.length,
         totalVisits,
-        previousVisits: previousVisitsCount || 0,
+        previousVisits,
         activeCarts,
         abandonedCarts,
         conversionRate,
       });
-      setRevenueData(revenueChartData);
-      setOrdersData(ordersChartData);
-      setCategoriesData(categoriesChartData);
-    } catch (error) {
+      setRevenueData(series.revenue);
+      setOrdersData(series.orders);
+      setCategoriesData(categoryBreakdown(ordersInRange));
+    } catch (error: any) {
       console.error('Erreur lors du chargement des stats:', error);
+      toastHook.toast({
+        title: 'Statistiques non chargées',
+        description: error?.message || 'Réessayez dans un instant.',
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
   };
 
+  // Évolution en % : rien à afficher sans période de comparaison ou si elle est à zéro
   const calculateChange = (current: number, previous: number) => {
-    if (previous === 0) return current > 0 ? 100 : 0;
+    if (timeFilter === 'all' || previous === 0) return null;
     return Math.round(((current - previous) / previous) * 100);
   };
 
   const revenueChange = calculateChange(stats.totalRevenue, stats.previousRevenue);
   const ordersChange = calculateChange(stats.totalOrders, stats.previousOrders);
   const visitsChange = calculateChange(stats.totalVisits, stats.previousVisits);
+
+  const categoriesTotal = categoriesData.reduce((sum, cat) => sum + cat.value, 0);
+  const categoriesShown = topCategories(categoriesData);
 
   const statCards = [
     {
@@ -333,7 +248,7 @@ const Dashboard = () => {
       change: null,
       color: "bg-gradient-to-br from-pink-500 to-rose-600",
       iconColor: "text-pink-100",
-      link: "/admin/contact",
+      link: "/admin/messages",
       description: "Messages en attente"
     },
     {
@@ -352,16 +267,16 @@ const Dashboard = () => {
       change: ordersChange,
       color: "bg-gradient-to-br from-emerald-500 to-green-600",
       iconColor: "text-emerald-100",
-      description: "Commandes totales"
+      description: "Sur la période, hors annulées"
     },
     {
       title: "Revenu Total",
-      value: `${stats.totalRevenue.toLocaleString()} FCFA`,
+      value: `${stats.totalRevenue.toLocaleString('fr-FR')} FCFA`,
       icon: DollarSign,
       change: revenueChange,
       color: "bg-gradient-to-br from-violet-500 to-purple-600",
       iconColor: "text-violet-100",
-      description: "Chiffre d'affaires"
+      description: "Ventes terminées ou en cours"
     },
   ];
 
@@ -469,7 +384,7 @@ const Dashboard = () => {
               </div>
               <h3 className="font-semibold text-lg">Produits</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                {stats.totalProducts} produits en stock
+                {stats.totalProducts} produits actifs
               </p>
             </CardContent>
           </Card>
@@ -530,7 +445,7 @@ const Dashboard = () => {
                     <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Gains</span>
                   </div>
                   <p className="text-2xl font-bold text-emerald-600">{dailyStats.todayRevenue.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">FCFA (commandes complétées)</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">FCFA (ventes terminées ou en cours)</p>
                 </div>
                 <div className="bg-white rounded-xl p-4 border shadow-sm">
                   <div className="flex items-center gap-2 mb-1">
@@ -598,7 +513,7 @@ const Dashboard = () => {
                   </div>
                   {card.link && (
                     <Link to={card.link}>
-                      <Button variant="ghost" size="sm" className="text-white hover:text-white hover:bg-white/20">
+                      <Button variant="outline" size="sm">
                         Voir
                       </Button>
                     </Link>
@@ -642,7 +557,7 @@ const Dashboard = () => {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="text-xl">Chiffre d'affaires</CardTitle>
-                <CardDescription>Évolution du revenu sur la période</CardDescription>
+                <CardDescription>Ventes terminées ou en cours, sur la période</CardDescription>
               </div>
               <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
                 <BarChart3 className="h-4 w-4 text-blue-600" />
@@ -672,7 +587,7 @@ const Dashboard = () => {
                     borderRadius: "8px",
                     boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
                   }}
-                  formatter={(value) => [`${value} FCFA`, 'Revenu']}
+                  formatter={(value) => [`${Number(value).toLocaleString('fr-FR')} FCFA`, 'Revenu']}
                   labelFormatter={(label) => `Date: ${label}`}
                 />
                 <Line 
@@ -729,7 +644,7 @@ const Dashboard = () => {
                   dataKey="commandes" 
                   fill={CHART_COLORS.accent} 
                   radius={[6, 6, 0, 0]}
-                  barSize={40}
+                  maxBarSize={40}
                 />
               </BarChart>
             </ResponsiveContainer>
@@ -742,7 +657,7 @@ const Dashboard = () => {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="text-xl">Répartition par catégorie</CardTitle>
-                <CardDescription>Ventes par catégorie de produits</CardDescription>
+                <CardDescription>Chiffre d'affaires de la période : produits par catégorie et services</CardDescription>
               </div>
               <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center">
                 <Package className="h-4 w-4 text-violet-600" />
@@ -750,30 +665,23 @@ const Dashboard = () => {
             </div>
           </CardHeader>
           <CardContent className="pt-6">
+            {categoriesShown.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-12">Aucune vente sur cette période.</p>
+            ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
                   <Pie
-                    data={categoriesData.slice(0, 5)}
+                    data={categoriesShown}
                     cx="50%"
                     cy="50%"
                     innerRadius={60}
                     outerRadius={100}
                     paddingAngle={2}
                     dataKey="value"
-                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
                   >
-                    {categoriesData.slice(0, 5).map((entry, index) => (
-                      <Cell 
-                        key={`cell-${index}`} 
-                        fill={[
-                          CHART_COLORS.primary,
-                          CHART_COLORS.accent,
-                          CHART_COLORS.success,
-                          CHART_COLORS.warning,
-                          CHART_COLORS.danger
-                        ][index % 5]} 
-                      />
+                    {categoriesShown.map((entry, index) => (
+                      <Cell key={entry.name} fill={CATEGORY_COLORS[index % CATEGORY_COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip
@@ -783,7 +691,7 @@ const Dashboard = () => {
                       borderRadius: "8px",
                       boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
                     }}
-                    formatter={(value) => [`${value} FCFA`, 'Ventes']}
+                    formatter={(value, name) => [`${Number(value).toLocaleString('fr-FR')} FCFA`, name]}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -792,37 +700,27 @@ const Dashboard = () => {
               <div className="space-y-4">
                 <h3 className="font-semibold text-lg">Top Catégories</h3>
                 <div className="space-y-3">
-                  {categoriesData.slice(0, 5).map((category, index) => {
-                    const total = categoriesData.reduce((sum, cat) => sum + cat.value, 0);
-                    const percentage = total > 0 ? (category.value / total * 100).toFixed(1) : 0;
-                    
-                    return (
-                      <div key={category.name} className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div 
-                            className="w-3 h-3 rounded-full"
-                            style={{
-                              backgroundColor: [
-                                CHART_COLORS.primary,
-                                CHART_COLORS.accent,
-                                CHART_COLORS.success,
-                                CHART_COLORS.warning,
-                                CHART_COLORS.danger
-                              ][index % 5]
-                            }}
-                          />
-                          <span className="font-medium">{category.name}</span>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-semibold">{category.value.toLocaleString()} FCFA</p>
-                          <p className="text-sm text-muted-foreground">{percentage}%</p>
-                        </div>
+                  {categoriesShown.map((category, index) => (
+                    <div key={category.name} className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className="w-3 h-3 rounded-full shrink-0"
+                          style={{ backgroundColor: CATEGORY_COLORS[index % CATEGORY_COLORS.length] }}
+                        />
+                        <span className="font-medium truncate">{category.name}</span>
                       </div>
-                    );
-                  })}
+                      <div className="text-right shrink-0">
+                        <p className="font-semibold">{category.value.toLocaleString('fr-FR')} FCFA</p>
+                        <p className="text-sm text-muted-foreground">
+                          {categoriesTotal > 0 ? (category.value / categoriesTotal * 100).toFixed(1) : 0}%
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
+            )}
           </CardContent>
         </Card>
       </div>
