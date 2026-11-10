@@ -45,6 +45,12 @@ import DepensesPage from "./pages/admin/Depenses";
 import AgentIA from "./pages/admin/AgentIA";
 import WhatsAppNotifs from "./pages/admin/WhatsAppNotifs";
 import Invoices from "./pages/admin/Invoices";
+import Funnels from "./pages/admin/Funnels";
+import FunnelEditor from "./pages/admin/FunnelEditor";
+import FunnelOrders from "./pages/admin/FunnelOrders";
+import FunnelPayments from "./pages/admin/FunnelPayments";
+import FunnelPromo from "./pages/promo/FunnelPromo";
+import FunnelOrder from "./pages/promo/FunnelOrder";
 
 const queryClient = new QueryClient();
 
@@ -112,6 +118,9 @@ const App = () => (
                 <Footer />
               </div>
             } />
+            {/* Funnels promo : pages autonomes (sans en-tête ni pied du site) */}
+            <Route path="/promo/commande/:token" element={<FunnelOrder />} />
+            <Route path="/promo/:slug" element={<FunnelPromo />} />
             <Route path="/panier" element={
               <div className="flex flex-col min-h-screen">
                 <Header />
@@ -200,6 +209,11 @@ const App = () => (
               <Route path="categories" element={<Categories />} />
               <Route path="orders" element={<Orders />} />
               <Route path="invoices" element={<Invoices />} />
+              <Route path="funnels" element={<AdminOnly><Funnels /></AdminOnly>} />
+              <Route path="funnels/paiement" element={<AdminOnly><FunnelPayments /></AdminOnly>} />
+              <Route path="funnels/nouveau" element={<AdminOnly><FunnelEditor /></AdminOnly>} />
+              <Route path="funnels/:id" element={<AdminOnly><FunnelEditor /></AdminOnly>} />
+              <Route path="funnels/:id/commandes" element={<AdminOnly><FunnelOrders /></AdminOnly>} />
               <Route path="carts" element={<AbandonedCarts />} />
               <Route path="clients" element={<Clients />} />
               <Route path="clients/:id" element={<ClientDetail />} />

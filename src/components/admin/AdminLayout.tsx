@@ -21,6 +21,7 @@ import {
   Bot,
   Smartphone,
   FileText,
+  Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +35,7 @@ const AdminLayout = ({ children }: { children?: any }) => {
   const [user, setUser] = useState<any>(null);
   const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
+  const [funnelsToProcess, setFunnelsToProcess] = useState(0);
 
   const fetchStats = async () => {
     try {
@@ -49,6 +51,12 @@ const AdminLayout = ({ children }: { children?: any }) => {
       if (messagesResp.ok) {
         const messagesData = await messagesResp.json().catch(() => ({}));
         setUnreadMessagesCount((messagesData.results || []).length);
+      }
+      // Funnels promo : paiements déclarés / livraisons à encaisser (admins seulement, 403 sinon)
+      const funnelsResp = await apiFetch('/api/admin/funnels/summary').catch(() => null);
+      if (funnelsResp?.ok) {
+        const f = await funnelsResp.json().catch(() => ({}));
+        setFunnelsToProcess(f.data?.to_process || 0);
       }
     } catch (err) {
       console.error('fetchStats error', err);
@@ -130,6 +138,7 @@ const AdminLayout = ({ children }: { children?: any }) => {
     { path: "/admin/orders", icon: ShoppingCart, label: "Commandes", badge: "pending" },
     { path: "/admin/invoices", icon: FileText, label: "Factures", badge: null },
     { path: "/admin/carts", icon: ShoppingCart, label: "Paniers", badge: null },
+    { path: "/admin/funnels", icon: Megaphone, label: "Funnels promo", badge: "funnels", adminOnly: true },
     { path: "/admin/messages", icon: MessageSquare, label: "Messages", badge: "unread" },
     //{ path: "/admin/testimonials", icon: MessageSquare, label: "Témoignages", badge: null },
     { path: "/admin/depenses", icon: TrendingDown, label: "Dépenses", badge: null },
@@ -210,7 +219,8 @@ const AdminLayout = ({ children }: { children?: any }) => {
             {filteredNavItems.map((item) => {
               const Icon = item.icon;
               const targetPath = (item.path === '/admin' && isEmployee) ? '/admin/employe' : item.path;
-              const isActive = location.pathname === targetPath;
+              // Sous-pages (ex. /admin/funnels/:id) : l'entrée parente reste active
+              const isActive = location.pathname === targetPath || (targetPath !== '/admin' && location.pathname.startsWith(`${targetPath}/`));
               
               return (
                 <Link key={targetPath} to={targetPath} className="no-underline">
@@ -232,6 +242,11 @@ const AdminLayout = ({ children }: { children?: any }) => {
                     {item.badge === "pending" && pendingOrdersCount > 0 && (
                       <Badge variant="secondary" className="h-5 px-1.5 text-xs">
                         {pendingOrdersCount > 99 ? '99+' : pendingOrdersCount}
+                      </Badge>
+                    )}
+                    {item.badge === "funnels" && funnelsToProcess > 0 && (
+                      <Badge className="h-5 px-1.5 text-xs bg-orange-500 hover:bg-orange-500">
+                        {funnelsToProcess > 99 ? '99+' : funnelsToProcess}
                       </Badge>
                     )}
                   </div>
