@@ -4,7 +4,7 @@ const adminAuth = require('../middleware/adminAuth');
 const cloudinary = require('../config/cloudinary');
 
 // Dossiers autorisés dans Cloudinary (évite les chemins arbitraires)
-const ALLOWED_FOLDERS = ['products', 'categories', 'services', 'misc'];
+const ALLOWED_FOLDERS = ['products', 'categories', 'services', 'funnels', 'misc'];
 
 // Taille max acceptée (le base64 ajoute ~33% : 5MB fichier ≈ 6.7MB en base64)
 const MAX_DATA_URL_LENGTH = 7.5 * 1024 * 1024;

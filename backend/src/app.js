@@ -27,6 +27,9 @@ const adminServicesRouter = require('./routes/adminServices');
 const adminDepensesRouter = require('./routes/adminDepenses');
 const adminAgentRouter    = require('./routes/adminAgent');
 const adminInvoicesRouter = require('./routes/adminInvoices');
+const funnelsRouter = require('./routes/funnels');
+const adminFunnelsRouter = require('./routes/adminFunnels');
+const { expireReservations } = require('./services/funnelService');
 const uploadsRouter = require('./routes/uploads');
 
 const cron = require('node-cron');
@@ -172,6 +175,8 @@ app.use('/api/admin/services', adminServicesRouter);
 app.use('/api/admin/depenses', adminDepensesRouter);
 app.use('/api/admin/agent',   adminAgentRouter);
 app.use('/api/admin/invoices', adminInvoicesRouter);
+app.use('/api/funnels', funnelsRouter);
+app.use('/api/admin/funnels', adminFunnelsRouter);
 
 // ─── Rapport journalier automatique à 22h00 ────────────────────────────────
 // Route manuelle pour forcer le rapport (admin ou employé ; l'envoi part toujours vers l'adresse configurée)
@@ -197,6 +202,16 @@ cron.schedule('0 22 * * *', async () => {
 }, { timezone: 'Africa/Dakar' });
 
 console.log('[DailyReport] Cron planifié à 22h00 (Africa/Dakar)');
+
+// Funnels promo : réservations non payées expirées toutes les 5 minutes (stock libéré, relance)
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    await expireReservations();
+  } catch (err) {
+    // Table absente tant que la migration n'est pas passée : on ne bloque pas le serveur
+    if (err.code !== '42P01') console.error('[Funnel] Expiration des réservations :', err.message);
+  }
+});
 
 app.use((err, req, res, next) => {
   if (err.message === 'CORS_NOT_ALLOWED') {

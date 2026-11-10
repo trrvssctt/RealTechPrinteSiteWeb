@@ -10,6 +10,7 @@ const N8N_BASE_URL     = process.env.N8N_BASE_URL     || 'http://localhost:5678'
 const N8N_EVENTS_PATH  = process.env.N8N_EVENTS_PATH  || '/webhook/realtech/events';
 const N8N_AGENT_PATH   = process.env.N8N_AGENT_PATH   || '/webhook/realtech/agent/chat';
 const N8N_REPORT_PATH  = process.env.N8N_REPORT_PATH  || '/webhook/realtech/rapport-journalier';
+const N8N_FUNNEL_PATH  = process.env.N8N_FUNNEL_PATH  || '/webhook/rt-funnel-001';
 const N8N_WEBHOOK_KEY  = process.env.N8N_WEBHOOK_KEY  || '';
 
 function buildHeaders() {
@@ -39,12 +40,12 @@ async function logNotification(event_type, event_id, message, status, error_mess
   }
 }
 
-async function sendEvent(payload) {
+async function sendEvent(payload, path = N8N_EVENTS_PATH) {
   if (!process.env.N8N_BASE_URL) {
     console.warn('[n8n] N8N_BASE_URL non défini – événement ignoré :', payload.event_type);
     return;
   }
-  const url = `${N8N_BASE_URL}${N8N_EVENTS_PATH}`;
+  const url = `${N8N_BASE_URL}${path}`;
   try {
     const { default: fetch } = await import('node-fetch');
     const resp = await fetch(url, {
@@ -444,6 +445,12 @@ async function notifyDailyReport(reportInfo) {
 
 // ─── Agent IA (requête synchrone — attend la réponse n8n) ──────────────────
 
+// ─── Funnels promo : mails client / équipe (workflow n8n « RealTech Funnel ») ───
+// payload : { event_type: 'funnel.xxx', event_id, ...données } — voir funnelsController.buildEventPayload
+async function notifyFunnel(payload) {
+  await sendEvent(payload, N8N_FUNNEL_PATH);
+}
+
 async function askAgent(question, adminId, conversationId, messages = []) {
   if (!process.env.N8N_BASE_URL) {
     return { answer: "L'agent IA n'est pas encore configuré (N8N_BASE_URL manquant)." };
@@ -475,6 +482,7 @@ async function askAgent(question, adminId, conversationId, messages = []) {
 }
 
 module.exports = {
+  notifyFunnel,
   notifySaleCompleted,
   notifyOrderCreated,
   notifyOrderCancelled,
