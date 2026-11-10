@@ -56,6 +56,7 @@ export interface AdminFunnel {
   held: number;
   image: string | null;
   image_url: string | null;
+  images: string[];
   description: string | null;
   bullets: string[];
   starts_at: string | null;

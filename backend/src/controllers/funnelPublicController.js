@@ -53,7 +53,8 @@ exports.getFunnel = async (req, res, next) => {
     const settings = await getPaymentSettings();
     const variants = (await variantsWithAvailability(f.id, db, { activeOnly: true }))
       .map((v) => ({ id: v.id, label: v.label, price: v.price, stock: Number(v.stock), available: Math.min(v.available, Math.max(0, Number(f.product_stock) || 0)) }));
-    const images = [f.image_url, f.product_image, ...(f.product_images || [])].filter(Boolean);
+    // Galerie du funnel si elle a été composée, sinon les photos du produit
+    const images = (Array.isArray(f.images) && f.images.length ? f.images : [f.image_url, f.product_image, ...(f.product_images || [])]).filter(Boolean);
 
     res.json({
       data: {

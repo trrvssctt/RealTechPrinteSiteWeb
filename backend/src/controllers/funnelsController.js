@@ -121,6 +121,11 @@ async function validateFunnel(b, funnelId = null) {
     cleanVariants.push({ id: UUID_RE.test(String(v.id || '')) ? v.id : null, label, price, stock, is_active: v.is_active !== false, position: i });
   }
 
+  // Galerie : URL Cloudinary (https) ou chemins du site ; la première est la photo principale
+  const rawImages = Array.isArray(b.images) ? b.images : (b.image_url ? [b.image_url] : []);
+  const images = [...new Set(rawImages.map((u) => clean(u, 500)).filter((u) => /^(https?:\/\/|\/)/.test(u)))];
+  if (images.length > 12) return { error: '12 photos maximum par funnel' };
+
   const pm = b.payment_methods || {};
   return {
     data: {
@@ -129,7 +134,8 @@ async function validateFunnel(b, funnelId = null) {
       product_id: b.product_id,
       description: clean(b.description, 2000) || null,
       bullets: (Array.isArray(b.bullets) ? b.bullets : []).map((x) => clean(x, 160)).filter(Boolean).slice(0, 8),
-      image_url: clean(b.image_url, 500) || null,
+      images,
+      image_url: images[0] || null,
       starts_at: startsAt,
       ends_at: endsAt,
       is_published: !!b.is_published,
@@ -175,7 +181,7 @@ async function saveFunnel(req, res, next, funnelId) {
     if (v.error) return res.status(400).json({ error: v.error });
     const d = v.data;
     const cols = [d.title, d.slug, d.product_id, d.description, JSON.stringify(d.bullets), d.image_url, d.starts_at, d.ends_at,
-      d.is_published, d.max_qty, JSON.stringify(d.payment_methods), d.confirmation_message];
+      d.is_published, d.max_qty, JSON.stringify(d.payment_methods), d.confirmation_message, JSON.stringify(d.images)];
 
     tx = await db.connect();
     await tx.query('BEGIN');
@@ -184,8 +190,8 @@ async function saveFunnel(req, res, next, funnelId) {
       const { rowCount } = await tx.query(
         `UPDATE app.funnels SET title = $1, slug = $2, product_id = $3, description = $4, bullets = $5::jsonb, image_url = $6,
                 starts_at = $7, ends_at = $8, is_published = $9, max_qty = $10, payment_methods = $11::jsonb,
-                confirmation_message = $12, updated_at = now()
-          WHERE id = $13`,
+                confirmation_message = $12, images = $13::jsonb, updated_at = now()
+          WHERE id = $14`,
         [...cols, funnelId]
       );
       if (!rowCount) {
@@ -195,8 +201,8 @@ async function saveFunnel(req, res, next, funnelId) {
     } else {
       const { rows } = await tx.query(
         `INSERT INTO app.funnels (title, slug, product_id, description, bullets, image_url, starts_at, ends_at,
-                                  is_published, max_qty, payment_methods, confirmation_message, created_by)
-         VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11::jsonb,$12,$13) RETURNING id`,
+                                  is_published, max_qty, payment_methods, confirmation_message, images, created_by)
+         VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11::jsonb,$12,$13::jsonb,$14) RETURNING id`,
         [...cols, req.user?.id || null]
       );
       id = rows[0].id;

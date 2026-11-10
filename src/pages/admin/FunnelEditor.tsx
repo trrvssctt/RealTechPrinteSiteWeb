@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { format } from 'date-fns';
-import { ArrowLeft, Copy, ExternalLink, ImagePlus, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Copy, ExternalLink, ImagePlus, Loader2, Plus, Star, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -34,7 +34,7 @@ const emptyForm = {
   product_id: '',
   description: '',
   bullets: ['Livraison Dakar sous 24 h', 'Garantie 12 mois'],
-  image_url: '',
+  images: [] as string[], // galerie du funnel ; vide = photos du produit
   starts_at: '',
   ends_at: '',
   is_published: false,
@@ -72,7 +72,7 @@ export default function FunnelEditor() {
           product_id: f.product_id,
           description: f.description || '',
           bullets: f.bullets?.length ? f.bullets : [],
-          image_url: f.image_url || '',
+          images: f.images?.length ? f.images : f.image_url ? [f.image_url] : [],
           starts_at: toLocalInput(f.starts_at),
           ends_at: toLocalInput(f.ends_at),
           is_published: f.is_published,
@@ -91,7 +91,28 @@ export default function FunnelEditor() {
   const activeVariants = form.variants.filter((v) => v.is_active);
   const promoPrice = activeVariants.length ? Math.min(...activeVariants.map((v) => Number(v.price) || 0)) : 0;
   const pct = discountPct(regularPrice, promoPrice);
-  const previewImage = form.image_url || product?.image_url || product?.images?.[0]?.url || funnel?.image || null;
+  // Photos du produit (galerie par défaut) ; toute modification crée la galerie propre au funnel
+  const productPhotos = useMemo(
+    () => [...new Set([product?.image_url, ...(product?.images || []).map((i) => i.url)].filter(Boolean) as string[])],
+    [product]
+  );
+  const gallery = form.images.length ? form.images : productPhotos;
+  const usesProductPhotos = form.images.length === 0;
+  const previewImage = gallery[0] || funnel?.image || null;
+  const setGallery = (list: string[]) => setForm((f) => ({ ...f, images: list }));
+  const moveImage = (i: number, to: number) => {
+    if (to < 0 || to >= gallery.length) return;
+    const list = [...gallery];
+    const [img] = list.splice(i, 1);
+    list.splice(to, 0, img);
+    setGallery(list);
+  };
+
+  // Prix promo saisi = prix de la formule principale (la première)
+  const setPromoPrice = (price: number) => {
+    if (form.variants.length) setVariant(0, { price });
+    else set('variants', [{ label: product ? `${product.name} seule` : 'Formule unique', price, stock: Math.min(10, Number(product?.stock) || 0), is_active: true }]);
+  };
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((f) => ({ ...f, [key]: value }));
   const setVariant = (i: number, patch: Partial<FunnelVariant>) =>
@@ -114,23 +135,28 @@ export default function FunnelEditor() {
     return products.filter((p) => p.name.toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q)).slice(0, 8);
   }, [productSearch, products]);
 
-  const uploadImage = async (file: File) => {
-    if (file.size > 5 * 1024 * 1024) return toast.error('Image trop lourde (5 Mo max)');
+  // Ajout de photos (plusieurs à la fois), à la suite de la galerie affichée
+  const uploadImages = async (files: File[]) => {
+    const base = gallery;
     setUploading(true);
+    const added: string[] = [];
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(String(r.result));
-        r.onerror = reject;
-        r.readAsDataURL(file);
-      });
-      const resp = await apiFetch('/api/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: dataUrl, folder: 'funnels' }) });
-      const j = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(j.error || 'Envoi impossible');
-      set('image_url', j.data.url);
-    } catch (e: any) {
-      toast.error(e.message);
+      for (const file of files) {
+        if (base.length + added.length >= 12) { toast.error('12 photos maximum'); break; }
+        if (file.size > 5 * 1024 * 1024) { toast.error(`${file.name} : trop lourde (5 Mo max)`); continue; }
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result));
+          r.onerror = reject;
+          r.readAsDataURL(file);
+        });
+        const resp = await apiFetch('/api/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: dataUrl, folder: 'funnels' }) });
+        const j = await resp.json().catch(() => ({}));
+        if (!resp.ok) { toast.error(`${file.name} : ${j.error || 'envoi impossible'}`); continue; }
+        added.push(j.data.url);
+      }
     } finally {
+      if (added.length) setGallery([...base, ...added]);
       setUploading(false);
     }
   };
@@ -258,8 +284,15 @@ export default function FunnelEditor() {
                   <Input value={fmtPrice(regularPrice)} disabled />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Prix promo (dès)</Label>
-                  <Input value={`${fmtPrice(promoPrice)}${pct ? ` · −${pct} %` : ''}`} disabled />
+                  <Label htmlFor="promo">Prix promo (F CFA)</Label>
+                  <Input id="promo" type="number" min={0} step={500} value={form.variants[0]?.price ?? ''} placeholder="Ex. 225000"
+                    onChange={(e) => setPromoPrice(Number(e.target.value))} />
+                  <p className="text-xs text-muted-foreground">
+                    {discountPct(regularPrice, Number(form.variants[0]?.price) || 0) > 0
+                      ? `−${discountPct(regularPrice, Number(form.variants[0]?.price) || 0)} % sur le prix normal`
+                      : regularPrice && Number(form.variants[0]?.price) >= regularPrice ? 'Pas moins cher que le prix normal' : ' '}
+                    {form.variants.length > 1 && ` · formule « ${form.variants[0].label || '1'} »`}
+                  </p>
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="maxq">Quantité max. par commande</Label>
@@ -338,17 +371,41 @@ export default function FunnelEditor() {
                 {form.bullets.length < 8 && <button type="button" className="text-sm font-semibold text-blue-600" onClick={() => set('bullets', [...form.bullets, ''])}>+ Ajouter un argument</button>}
               </div>
               <div className="space-y-2">
-                <Label>Image principale</Label>
-                <div className="flex items-center gap-3">
-                  <div className="h-20 w-20 rounded-lg bg-muted overflow-hidden">{previewImage && <img src={previewImage} alt="" className="h-full w-full object-cover" />}</div>
-                  <div className="space-y-2">
-                    <label className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium cursor-pointer hover:bg-muted">
-                      {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />} Choisir une image
-                      <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])} />
+                <div className="flex items-center justify-between gap-3">
+                  <Label>Photos ({gallery.length}/12)</Label>
+                  {!usesProductPhotos && productPhotos.length > 0 && (
+                    <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => setGallery([])}>Revenir aux photos du produit</button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {usesProductPhotos ? 'Photos du produit utilisées par défaut. ' : ''}La première est la photo principale ; les autres s'affichent en miniatures sous elle.
+                </p>
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                  {gallery.map((src, i) => (
+                    <div key={src} className={`group relative aspect-square rounded-lg overflow-hidden border-2 ${i === 0 ? 'border-blue-600' : 'border-transparent'} bg-muted`}>
+                      <img src={src} alt="" className="h-full w-full object-cover" />
+                      {i === 0 && <span className="absolute top-1.5 left-1.5 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">Principale</span>}
+                      <button type="button" aria-label="Retirer la photo" onClick={() => setGallery(gallery.filter((_, j) => j !== i))}
+                        className="absolute top-1.5 right-1.5 rounded-full bg-black/60 p-1 text-white hover:bg-red-600"><X className="h-3.5 w-3.5" /></button>
+                      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/55 px-1 py-1">
+                        <button type="button" aria-label="Avancer" disabled={i === 0} onClick={() => moveImage(i, i - 1)} className="p-0.5 text-white disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
+                        {i > 0 && (
+                          <button type="button" onClick={() => moveImage(i, 0)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-white">
+                            <Star className="h-3 w-3" />Principale
+                          </button>
+                        )}
+                        <button type="button" aria-label="Reculer" disabled={i === gallery.length - 1} onClick={() => moveImage(i, i + 1)} className="p-0.5 text-white disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
+                      </div>
+                    </div>
+                  ))}
+                  {gallery.length < 12 && (
+                    <label className="aspect-square rounded-lg border-2 border-dashed flex flex-col items-center justify-center gap-1 text-sm text-muted-foreground cursor-pointer hover:bg-muted">
+                      {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImagePlus className="h-5 w-5" />}
+                      {uploading ? 'Envoi…' : 'Ajouter'}
+                      <input type="file" multiple accept="image/png,image/jpeg,image/webp" className="hidden" disabled={uploading}
+                        onChange={(e) => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) uploadImages(files); }} />
                     </label>
-                    {form.image_url ? <button type="button" className="block text-xs text-muted-foreground hover:underline" onClick={() => set('image_url', '')}>Revenir aux photos du produit</button>
-                      : <p className="text-xs text-muted-foreground">Par défaut : les photos du produit.</p>}
-                  </div>
+                  )}
                 </div>
               </div>
             </>

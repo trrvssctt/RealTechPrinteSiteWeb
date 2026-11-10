@@ -77,6 +77,10 @@ CREATE TABLE IF NOT EXISTS app.funnel_orders (
 CREATE INDEX IF NOT EXISTS idx_funnel_orders_funnel ON app.funnel_orders (funnel_id, status);
 CREATE INDEX IF NOT EXISTS idx_funnel_orders_variant ON app.funnel_orders (variant_id, status);
 
+-- Galerie du funnel (ordre d'affichage, la première est la photo principale).
+-- Vide = photos du produit. Ajoutée après coup : la migration peut être relancée.
+ALTER TABLE app.funnels ADD COLUMN IF NOT EXISTS images jsonb NOT NULL DEFAULT '[]'::jsonb;
+
 -- Réglages de paiement par défaut (modifiables dans Funnels promo › Réglages paiement)
 INSERT INTO app.settings (key, value, description)
 VALUES ('funnel_payment', '{
