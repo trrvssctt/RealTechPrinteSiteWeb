@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const adminOrEmployeeAuth = require('../middleware/adminOrEmployeeAuth');
 const clientsController = require('../controllers/clientsController');
 
-// Public lookup for clients by email or phone
-router.get('/lookup', clientsController.lookup);
+// Recherche d'un client par email ou téléphone : réservée au personnel (données personnelles)
+router.get('/lookup', adminOrEmployeeAuth, clientsController.lookup);
 
 module.exports = router;
