@@ -26,6 +26,13 @@ router.post('/', adminAuth, async (req, res, next) => {
 
     const targetFolder = ALLOWED_FOLDERS.includes(folder) ? folder : 'misc';
 
+    // Variables absentes du .env (ex. bloc .env du script de déploiement incomplet)
+    const missing = ['CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET'].filter((k) => !process.env[k]);
+    if (missing.length) {
+      console.error('[Cloudinary] Configuration manquante :', missing.join(', '));
+      return res.status(503).json({ error: `Envoi d'images indisponible : configuration Cloudinary manquante sur le serveur (${missing.join(', ')})` });
+    }
+
     const result = await cloudinary.uploader.upload(image, {
       folder: `realtech/${targetFolder}`,
       resource_type: 'image',
@@ -44,7 +51,12 @@ router.post('/', adminAuth, async (req, res, next) => {
       },
     });
   } catch (err) {
-    console.error('[Cloudinary] Upload error:', err.message);
+    // Erreur renvoyée par Cloudinary (clés invalides, compte désactivé…) : message lisible côté admin
+    const detail = err.message || err.error?.message;
+    console.error('[Cloudinary] Upload error:', detail);
+    if (err.http_code || err.error?.http_code) {
+      return res.status(502).json({ error: `Cloudinary a refusé l'image : ${detail}` });
+    }
     next(err);
   }
 });
