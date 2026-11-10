@@ -108,11 +108,19 @@ export default function FunnelEditor() {
     setGallery(list);
   };
 
-  // Prix promo saisi = prix de la formule principale (la première)
-  const setPromoPrice = (price: number) => {
-    if (form.variants.length) setVariant(0, { price });
-    else set('variants', [{ label: product ? `${product.name} seule` : 'Formule unique', price, stock: Math.min(10, Number(product?.stock) || 0), is_active: true }]);
+  // Prix / stock promo saisis = ceux de la formule principale (la première)
+  const setFirstVariant = (patch: Partial<FunnelVariant>) => {
+    if (form.variants.length) setVariant(0, patch);
+    else set('variants', [{ label: product ? `${product.name} seule` : 'Formule unique', price: 0, stock: Math.min(10, Number(product?.stock) || 0), is_active: true, ...patch }]);
   };
+  const multiFormula = form.variants.length > 1;
+  const realStock = Number(product?.stock ?? funnel?.product_stock ?? 0);
+  // Quantité qu'un client peut réellement commander : quantité max., stock promo restant et stock réel
+  const orderableQty = Math.max(0, Math.min(
+    form.max_qty,
+    realStock || Infinity,
+    Math.max(0, ...form.variants.filter((v) => v.is_active).map((v) => Number(v.stock) - Number(v.held || 0))),
+  ));
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((f) => ({ ...f, [key]: value }));
   const setVariant = (i: number, patch: Partial<FunnelVariant>) =>
@@ -278,26 +286,54 @@ export default function FunnelEditor() {
                 )}
               </div>
 
-              <div className="grid sm:grid-cols-3 gap-4">
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="space-y-1.5">
                   <Label>Prix normal</Label>
                   <Input value={fmtPrice(regularPrice)} disabled />
+                  <p className="text-xs text-muted-foreground">Prix du catalogue</p>
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="promo">Prix promo (F CFA)</Label>
                   <Input id="promo" type="number" min={0} step={500} value={form.variants[0]?.price ?? ''} placeholder="Ex. 225000"
-                    onChange={(e) => setPromoPrice(Number(e.target.value))} />
+                    onChange={(e) => setFirstVariant({ price: Number(e.target.value) })} />
                   <p className="text-xs text-muted-foreground">
                     {discountPct(regularPrice, Number(form.variants[0]?.price) || 0) > 0
                       ? `−${discountPct(regularPrice, Number(form.variants[0]?.price) || 0)} % sur le prix normal`
                       : regularPrice && Number(form.variants[0]?.price) >= regularPrice ? 'Pas moins cher que le prix normal' : ' '}
-                    {form.variants.length > 1 && ` · formule « ${form.variants[0].label || '1'} »`}
+                    {multiFormula && ` · formule « ${form.variants[0].label || '1'} »`}
                   </p>
                 </div>
+                {!multiFormula && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="pstock">Stock promo (unités)</Label>
+                    <Input id="pstock" type="number" min={0} value={form.variants[0]?.stock ?? ''} placeholder="Ex. 10"
+                      onChange={(e) => setFirstVariant({ stock: Number(e.target.value) })} />
+                    <p className="text-xs text-muted-foreground">
+                      Unités vendues à ce prix.{' '}
+                      {realStock > 0 && Number(form.variants[0]?.stock) !== realStock && (
+                        <button type="button" className="text-blue-600 font-semibold" onClick={() => setFirstVariant({ stock: realStock })}>Tout le stock ({realStock})</button>
+                      )}
+                    </p>
+                  </div>
+                )}
                 <div className="space-y-1.5">
-                  <Label htmlFor="maxq">Quantité max. par commande</Label>
+                  <Label htmlFor="maxq">Quantité max. par client</Label>
                   <Input id="maxq" type="number" min={1} max={100} value={form.max_qty} onChange={(e) => set('max_qty', Number(e.target.value))} />
+                  <p className="text-xs text-muted-foreground">Par commande, pour éviter qu'un seul client prenne tout</p>
                 </div>
+              </div>
+
+              {/* Ce que le client pourra réellement commander */}
+              {form.variants.length > 0 && (
+                <p className={`rounded-lg px-3 py-2 text-sm ${orderableQty < Math.min(form.max_qty, 2) || orderableQty < form.max_qty ? 'bg-amber-50 text-amber-800' : 'bg-blue-50 text-blue-800'}`}>
+                  {orderableQty <= 0
+                    ? 'Plus aucune unité disponible au prix promo : les clients ne peuvent pas commander. Augmentez le stock promo.'
+                    : `Un client pourra commander jusqu'à ${orderableQty} unité${orderableQty > 1 ? 's' : ''}.`}
+                  {orderableQty > 0 && orderableQty < form.max_qty && ` La quantité max. (${form.max_qty}) est limitée par le stock promo encore disponible (${orderableQty}) : augmentez le stock promo pour en vendre plus.`}
+                </p>
+              )}
+
+              <div className="grid sm:grid-cols-3 gap-4">
                 <div className="space-y-1.5">
                   <Label htmlFor="start">Début</Label>
                   <Input id="start" type="datetime-local" value={form.starts_at} onChange={(e) => set('starts_at', e.target.value)} />
@@ -309,28 +345,42 @@ export default function FunnelEditor() {
               </div>
 
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Formules proposées</Label>
-                  <button type="button" className="text-sm font-semibold text-blue-600 inline-flex items-center gap-1"
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <Label>Formules</Label>
+                    <p className="text-xs text-muted-foreground">
+                      {multiFormula
+                        ? 'Le client choisit une formule : chacune a son prix et son propre stock promo.'
+                        : 'Une seule formule : le produit seul, au prix promo ci-dessus. Facultatif.'}
+                    </p>
+                  </div>
+                  <button type="button" className="shrink-0 text-sm font-semibold text-blue-600 inline-flex items-center gap-1"
                     onClick={() => set('variants', [...form.variants, { label: '', price: promoPrice || regularPrice, stock: 1, is_active: true }])}>
-                    <Plus className="h-4 w-4" />Ajouter
+                    <Plus className="h-4 w-4" />{multiFormula ? 'Ajouter une formule' : 'Proposer plusieurs formules'}
                   </button>
                 </div>
-                <div className="rounded-lg border divide-y">
-                  {form.variants.length === 0 && <p className="p-4 text-sm text-muted-foreground">Choisissez un produit pour créer la première formule.</p>}
-                  {form.variants.map((v, i) => (
-                    <div key={v.id || i} className={`grid grid-cols-[1fr_120px_90px_auto_auto] items-center gap-2 p-2 ${v.is_active ? '' : 'opacity-60'}`}>
-                      <Input aria-label="Nom de la formule" placeholder="Ex. Presse + 50 mugs" value={v.label} onChange={(e) => setVariant(i, { label: e.target.value })} />
-                      <Input aria-label="Prix" type="number" min={0} value={v.price} onChange={(e) => setVariant(i, { price: Number(e.target.value) })} />
-                      <Input aria-label="Stock promo" type="number" min={0} value={v.stock} onChange={(e) => setVariant(i, { stock: Number(e.target.value) })} />
-                      <Switch aria-label="Formule active" checked={v.is_active} onCheckedChange={(c) => setVariant(i, { is_active: c })} />
-                      <button type="button" aria-label="Retirer" className="p-1.5 text-muted-foreground hover:text-red-600"
-                        onClick={() => set('variants', form.variants.filter((_, j) => j !== i))}><X className="h-4 w-4" /></button>
-                      {v.held ? <p className="col-span-5 px-1 text-xs text-muted-foreground">{v.held} réservé(s) ou vendu(s) · {v.available} encore disponible(s)</p> : null}
+                {multiFormula && (
+                  <div className="rounded-lg border divide-y">
+                    <div className="grid grid-cols-[1fr_120px_90px_auto_28px] gap-2 px-2 py-1.5 text-xs font-semibold text-muted-foreground bg-muted/40">
+                      <span>Nom affiché (ex. Presse + 50 mugs)</span><span>Prix (F)</span><span>Stock promo</span><span>Active</span><span />
                     </div>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground">Prix en F CFA · stock promo par formule. Une formule déjà commandée qu'on retire est seulement désactivée.</p>
+                    {form.variants.map((v, i) => (
+                      <div key={v.id || i} className={`grid grid-cols-[1fr_120px_90px_auto_28px] items-center gap-2 p-2 ${v.is_active ? '' : 'opacity-60'}`}>
+                        <Input aria-label="Nom de la formule" placeholder="Ex. Presse + 50 mugs" value={v.label} onChange={(e) => setVariant(i, { label: e.target.value })} />
+                        <Input aria-label="Prix" type="number" min={0} value={v.price} onChange={(e) => setVariant(i, { price: Number(e.target.value) })} />
+                        <Input aria-label="Stock promo" type="number" min={0} value={v.stock} onChange={(e) => setVariant(i, { stock: Number(e.target.value) })} />
+                        <Switch aria-label="Formule active" checked={v.is_active} onCheckedChange={(c) => setVariant(i, { is_active: c })} />
+                        <button type="button" aria-label="Retirer" className="p-1.5 text-muted-foreground hover:text-red-600"
+                          onClick={() => set('variants', form.variants.filter((_, j) => j !== i))}><X className="h-4 w-4" /></button>
+                        {v.held ? <p className="col-span-5 px-1 text-xs text-muted-foreground">{v.held} réservé(s) ou vendu(s) · {v.available} encore disponible(s)</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {!multiFormula && form.variants[0]?.held ? (
+                  <p className="text-xs text-muted-foreground">{form.variants[0].held} unité(s) déjà réservée(s) ou vendue(s) sur {form.variants[0].stock}.</p>
+                ) : null}
+                {multiFormula && <p className="text-xs text-muted-foreground">Une formule déjà commandée qu'on retire est seulement désactivée.</p>}
               </div>
             </>
           )}

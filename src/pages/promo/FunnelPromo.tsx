@@ -166,7 +166,13 @@ export default function FunnelPromo() {
           <QtyStepper value={qty} max={maxQty} onChange={setQty} />
         </div>
       )}
-      {funnel.max_qty < 100 && <p className="text-xs text-gray-500">{funnel.max_qty} maximum par commande pendant la promo.</p>}
+      {variant && (
+        <p className="text-xs text-gray-500">
+          {variant.available < funnel.max_qty
+            ? `${variant.available} disponible${variant.available > 1 ? 's' : ''} au prix promo.`
+            : `${funnel.max_qty} maximum par commande pendant la promo.`}
+        </p>
+      )}
     </div>
   );
 
