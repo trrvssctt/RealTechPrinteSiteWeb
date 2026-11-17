@@ -112,12 +112,10 @@ function hasStamp(invoice: Invoice): boolean {
   return invoice.invoice_type === 'definitive' && orderStatus === 'completed';
 }
 
-// Mention de paiement à côté du cachet : « PAYÉ » (soldée) ou « ACOMPTE REÇU » avec le montant versé
+// Mention à côté du cachet : « ACOMPTE REÇU » avec le montant versé (factures d'acompte seulement ;
+// une facture soldée ou imprimée « définitive payée » n'a que le cachet et « PAYÉE » dans l'en-tête)
 function paymentMarkHtml(invoice: Invoice): string {
-  if (invoice.status === 'cancelled' || invoice.invoice_type === 'proforma') return '';
-  if (invoice.print_as_paid || (invoice.invoice_type === 'definitive' && invoice.order_state?.payment_status === 'paid')) {
-    return '<span class="paid-mark">PAYÉ</span>';
-  }
+  if (invoice.status === 'cancelled' || invoice.print_as_paid) return '';
   if (invoice.invoice_type === 'acompte') {
     const paid = Number(invoice.order_state?.amount_paid ?? invoice.acompte_amount ?? 0);
     return paid > 0 ? `<span class="paid-mark">ACOMPTE REÇU<small>${esc(fmtAmount(paid))} FCFA</small></span>` : '';
