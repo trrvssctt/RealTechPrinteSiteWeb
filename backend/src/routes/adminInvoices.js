@@ -10,5 +10,6 @@ router.post('/from-order', adminOrEmployeeAuth, ctrl.createFromOrder);
 router.post('/proforma',   adminOrEmployeeAuth, ctrl.createProforma);
 router.get('/:id',         adminOrEmployeeAuth, ctrl.getInvoice);
 router.patch('/:id/cancel', adminAuth,          ctrl.cancelInvoice);
+router.patch('/:id/print-as-paid', adminAuth,   ctrl.setPrintAsPaid);
 
 module.exports = router;

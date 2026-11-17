@@ -10,10 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { FileText, FilePlus, Plus, Download, ShoppingCart, XCircle, Loader2, Search, Trash2 } from "lucide-react";
+import { FileText, FilePlus, Plus, Download, ShoppingCart, XCircle, Loader2, Search, Trash2, BadgeCheck } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { INVOICE_TYPE_LABELS, ORDER_STATUS_LABELS, type Invoice } from "@/lib/invoiceTemplate";
-import { createInvoiceFromOrder, downloadInvoicePdf, fetchInvoice, fetchInvoices } from "@/lib/invoicePdf";
+import { createInvoiceFromOrder, downloadInvoicePdf, fetchInvoice, fetchInvoices, setInvoicePrintAsPaid } from "@/lib/invoicePdf";
 
 type Line = {
   key: string;
@@ -120,6 +120,26 @@ const Invoices = () => {
       await downloadFull(inv.id);
     } catch (err: any) {
       toast.error('Erreur PDF : ' + err.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // Le PDF devient « facture définitive payée » ; la commande garde son reste à payer dans l'application
+  const togglePrintAsPaid = async (inv: Invoice) => {
+    const enable = !inv.print_as_paid;
+    const remaining = Math.max(0, Number(inv.total_amount || 0) - Number(inv.acompte_amount || 0));
+    if (enable && !window.confirm(
+      `Imprimer ${inv.invoice_number} comme FACTURE DÉFINITIVE PAYÉE (cachet + « PAYÉ ») ?\n\n`
+      + `Le document n'affichera plus de reste à payer. Dans l'application, la commande restera à ${remaining.toLocaleString('fr-FR')} FCFA à encaisser.`
+    )) return;
+    setBusyId(inv.id);
+    try {
+      await setInvoicePrintAsPaid(inv.id, enable);
+      toast.success(enable ? `${inv.invoice_number} sera imprimée comme définitive payée` : `${inv.invoice_number} : impression normale rétablie`);
+      loadInvoices();
+    } catch (err: any) {
+      toast.error(err.message);
     } finally {
       setBusyId(null);
     }
@@ -421,7 +441,12 @@ const Invoices = () => {
                   {filtered.map(inv => (
                     <TableRow key={inv.id} className={inv.status === 'cancelled' ? 'opacity-60' : ''}>
                       <TableCell className="font-medium whitespace-nowrap">{inv.invoice_number}</TableCell>
-                      <TableCell><Badge variant="outline">{INVOICE_TYPE_LABELS[inv.invoice_type]}</Badge></TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{INVOICE_TYPE_LABELS[inv.invoice_type]}</Badge>
+                        {inv.print_as_paid && inv.status === 'issued' && (
+                          <div className="mt-1 text-[11px] font-semibold text-emerald-700 whitespace-nowrap">PDF : définitive payée</div>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <div>{inv.client?.name || '—'}</div>
                         {inv.client?.phone && <div className="text-xs text-muted-foreground">{inv.client.phone}</div>}
@@ -431,6 +456,7 @@ const Invoices = () => {
                           <>
                             <div>{formatCurrency(Number(inv.acompte_amount || 0))}</div>
                             <div className="text-xs text-muted-foreground">payé sur {formatCurrency(Number(inv.total_amount))}</div>
+                            <div className="text-xs font-semibold text-amber-700">reste {formatCurrency(Math.max(0, Number(inv.total_amount) - Number(inv.acompte_amount || 0)))}</div>
                           </>
                         ) : formatCurrency(Number(inv.total_amount))}
                       </TableCell>
@@ -450,6 +476,12 @@ const Invoices = () => {
                         {(inv.order_id || inv.converted_order_id) && (
                           <Button size="sm" variant="ghost" title="Voir les commandes" onClick={() => navigate('/admin/orders')}>
                             <FileText className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {isAdmin && inv.status === 'issued' && inv.order_id && inv.invoice_type !== 'proforma' && (inv.invoice_type === 'acompte' || inv.print_as_paid) && (
+                          <Button size="sm" variant="ghost" disabled={busyId === inv.id} onClick={() => togglePrintAsPaid(inv)}
+                            title={inv.print_as_paid ? "Rétablir l'impression normale (acompte)" : 'Imprimer comme facture définitive payée'}>
+                            <BadgeCheck className={`h-4 w-4 ${inv.print_as_paid ? 'text-emerald-600' : 'text-muted-foreground'}`} />
                           </Button>
                         )}
                         {isAdmin && inv.status === 'issued' && (

@@ -53,6 +53,9 @@ export interface Invoice {
   issued_at: string;
   created_by_name?: string | null;
   order_status?: string | null; // statut de la commande liée (cachet si terminée)
+  // Option admin : PDF imprimé comme facture définitive payée alors que la commande
+  // n'est pas soldée (l'application garde le reste à payer)
+  print_as_paid?: boolean;
   // État de la commande figé à l'émission (factures définitive / acompte)
   order_state?: {
     order_status: string;
@@ -165,7 +168,11 @@ export const DOC_CSS = `  * { margin: 0; padding: 0; box-sizing: border-box; }
   .notes { font-size: 11.5px; color: #4b5563; margin-top: 6px; font-style: italic; }
 
   .stamp { text-align: right; margin-top: 10px; }
-  .stamp img { width: 130px; opacity: 0.95; }
+  .stamp img { width: 130px; opacity: 0.95; vertical-align: middle; }
+  .paid-mark { display: inline-block; vertical-align: middle; margin-right: 28px; padding: 6px 18px;
+    border: 3px solid #047857; border-radius: 6px; color: #047857; font-weight: 800; font-size: 26px;
+    letter-spacing: 4px; transform: rotate(-8deg); text-align: center; line-height: 1.1; opacity: 0.9; }
+  .paid-mark small { display: block; font-size: 11px; letter-spacing: 1px; font-weight: 700; }
 
   .invoice-footer { margin-top: auto; padding-top: 16px; text-align: center; font-size: 10px;
     color: #9ca3af; font-style: italic; }
@@ -196,7 +203,9 @@ export function companyHeaderHTML(): string {
 }
 
 export function buildInvoiceHTML(invoice: Invoice): string {
-  const type: InvoiceType = invoice.invoice_type;
+  // Impression « définitive payée » demandée par l'admin : titre, type et état de paiement du document
+  const asPaid = invoice.print_as_paid === true && invoice.invoice_type !== 'proforma';
+  const type: InvoiceType = asPaid ? 'definitive' : invoice.invoice_type;
   const docTitle = INVOICE_TITLES[type] || 'FACTURE';
   const number = invoice.invoice_number;
   const date = fmtDate(invoice.issued_at);
@@ -238,7 +247,9 @@ export function buildInvoiceHTML(invoice: Invoice): string {
   // Après le TOTAL : versements reçus, total payé et reste à payer (état de la commande)
   const state = type !== 'proforma' ? invoice.order_state : null;
   let paymentRows = '';
-  if (state) {
+  if (asPaid) {
+    // Document soldé : pas de détail des versements ni de reste à payer
+  } else if (state) {
     for (const p of state.payments || []) {
       const mode = p.method ? ` (${PAYMENT_LABELS[p.method] || p.method})` : '';
       paymentRows += sumRow(`VERSEMENT DU ${esc(fmtShortDate(p.paid_at))}${esc(mode)}`, `${fmtAmount(p.amount)} FCFA`);
@@ -248,14 +259,15 @@ export function buildInvoiceHTML(invoice: Invoice): string {
   } else if (type === 'acompte' && invoice.acompte_amount != null) {
     paymentRows += sumRow('MONTANT DE L\'ACOMPTE', `${fmtAmount(Number(invoice.acompte_amount))} FCFA`, 'total');
   }
+  const shownPaid = asPaid || state?.payment_status === 'paid';
   const paymentLabelText = state
-    ? (state.payment_status === 'paid' ? 'PAYÉE' : 'NON PAYÉE')
+    ? (shownPaid ? 'PAYÉE' : state.payment_status === 'partial' ? 'PARTIELLEMENT PAYÉE' : 'NON PAYÉE')
     : null;
   const stateLine = state ? `
     <div class="status">
       Commande : <b>${esc(ORDER_STATUS_LABELS[state.order_status] || state.order_status)}</b>
       — Livraison : <b>${esc(DELIVERY_LABELS[state.delivery_status] || state.delivery_status)}</b>
-      — Paiement : <b class="${state.payment_status === 'paid' ? 'paid' : 'unpaid'}">${paymentLabelText}</b>
+      — Paiement : <b class="${shownPaid ? 'paid' : 'unpaid'}">${paymentLabelText}</b>
     </div>` : '';
 
   // Mode de paiement unique : seulement si la liste des versements (avec leur mode) n'est pas affichée

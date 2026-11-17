@@ -1,7 +1,7 @@
 import { apiFetch } from '@/lib/api';
 // Importé via Vite : URL valide en dev comme en build (le fichier n'est pas dans public/)
 import cachetUrl from '/assets/cachet_realtech.png';
-import { buildInvoiceHTML, type Invoice } from '@/lib/invoiceTemplate';
+import { buildInvoiceHTML, esc, fmtAmount, type Invoice } from '@/lib/invoiceTemplate';
 
 const A4_W_MM = 210;
 const A4_H_MM = 297;
@@ -102,20 +102,47 @@ export async function downloadHtmlAsPdf(html: string, filename: string): Promise
   }
 }
 
-// Cachet de l'entreprise : proformas non annulées et factures définitives de commande terminée
+// Cachet de l'entreprise : proformas et factures d'acompte non annulées, factures définitives
+// de commande terminée, et factures imprimées « définitive payée » par l'admin
 function hasStamp(invoice: Invoice): boolean {
-  if (invoice.invoice_type === 'proforma') return invoice.status !== 'cancelled';
+  if (invoice.status === 'cancelled') return false;
+  if (invoice.print_as_paid && invoice.invoice_type !== 'proforma') return true;
+  if (invoice.invoice_type === 'proforma' || invoice.invoice_type === 'acompte') return true;
   const orderStatus = invoice.order_state?.order_status || invoice.order_status;
   return invoice.invoice_type === 'definitive' && orderStatus === 'completed';
 }
 
+// Mention de paiement à côté du cachet : « PAYÉ » (soldée) ou « ACOMPTE REÇU » avec le montant versé
+function paymentMarkHtml(invoice: Invoice): string {
+  if (invoice.status === 'cancelled' || invoice.invoice_type === 'proforma') return '';
+  if (invoice.print_as_paid || (invoice.invoice_type === 'definitive' && invoice.order_state?.payment_status === 'paid')) {
+    return '<span class="paid-mark">PAYÉ</span>';
+  }
+  if (invoice.invoice_type === 'acompte') {
+    const paid = Number(invoice.order_state?.amount_paid ?? invoice.acompte_amount ?? 0);
+    return paid > 0 ? `<span class="paid-mark">ACOMPTE REÇU<small>${esc(fmtAmount(paid))} FCFA</small></span>` : '';
+  }
+  return '';
+}
+
 // Facture en PDF
 export async function downloadInvoicePdf(invoice: Invoice): Promise<void> {
-  const stampHtml = hasStamp(invoice)
-    ? `<div class="stamp"><img src="${cachetUrl}" alt="cachet"/></div>`
+  const mark = paymentMarkHtml(invoice);
+  const stampHtml = hasStamp(invoice) || mark
+    ? `<div class="stamp">${mark}${hasStamp(invoice) ? `<img src="${cachetUrl}" alt="cachet"/>` : ''}</div>`
     : '';
   const html = buildInvoiceHTML(invoice).replace('<div class="invoice-footer">', stampHtml + '<div class="invoice-footer">');
   await downloadHtmlAsPdf(html, `Facture-${invoice.invoice_number}.pdf`);
+}
+
+// Admin : imprimer (ou non) une facture de commande comme « définitive payée »
+export async function setInvoicePrintAsPaid(id: string, enabled: boolean): Promise<Invoice> {
+  const resp = await apiFetch(`/api/admin/invoices/${id}/print-as-paid`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  return (await readJson(resp)).data;
 }
 
 async function readJson(resp: Response) {

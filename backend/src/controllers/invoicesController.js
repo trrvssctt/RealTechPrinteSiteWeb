@@ -110,6 +110,7 @@ async function refreshInvoice(row) {
   const computed = await computeFromOrder(row.order_id);
   if (!computed) return row; // commande supprimée : dernière version connue
   const f = { ...computed.fields, invoice_type: computed.fields.invoice_type || row.invoice_type };
+  const printAsPaid = computed.order.metadata?.invoice_print?.definitive_paid === true;
   const { rows } = await db.query(
     `UPDATE app.invoices
         SET invoice_type = $1, client_id = $2, client = $3::jsonb, items = $4::jsonb, subtotal = $5,
@@ -120,7 +121,7 @@ async function refreshInvoice(row) {
     [f.invoice_type, f.client_id, JSON.stringify(f.client), JSON.stringify(f.items), f.subtotal, f.discount,
      f.total_amount, f.acompte_amount, f.payment_method, f.notes, JSON.stringify(f.order_state), row.id]
   );
-  return { ...rows[0], order_status: computed.order.status };
+  return { ...rows[0], order_status: computed.order.status, print_as_paid: printAsPaid };
 }
 
 // Liste des factures avec type, montant payé, total et client calculés en direct
@@ -144,6 +145,7 @@ async function queryInvoices({ type, status, order_id, client_id, q, limit = 200
               i.issued_at, i.created_by, i.payment_method, i.notes, i.discount, i.subtotal, i.items, i.order_state,
               u.full_name AS created_by_name,
               o.status AS order_status,
+              COALESCE(o.metadata->'invoice_print'->>'definitive_paid' = 'true', false) AS print_as_paid,
               CASE WHEN o.id IS NULL THEN i.invoice_type
                    WHEN ${paidSql('o')} >= o.total_amount THEN 'definitive'
                    ELSE 'acompte' END AS invoice_type,
@@ -306,6 +308,31 @@ exports.createProforma = async (req, res, next) => {
       created_by: req.user?.id,
     });
     res.status(201).json({ data: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// PATCH /api/admin/invoices/:id/print-as-paid { enabled }
+// Le PDF de la facture est imprimé comme « définitive, payée » (cachet + PAYÉ) alors que
+// la commande n'est pas soldée : l'application continue d'afficher le reste à payer.
+// L'option est rangée dans la commande (metadata.invoice_print), la facture suivant sa commande.
+exports.setPrintAsPaid = async (req, res, next) => {
+  try {
+    const enabled = req.body?.enabled === true;
+    const { rows } = await db.query(
+      `SELECT * FROM app.invoices WHERE id = $1 AND order_id IS NOT NULL AND invoice_type <> 'proforma' AND status = 'issued'`,
+      [req.params.id]
+    );
+    if (!rows[0]) return res.status(400).json({ error: 'Seule une facture de commande non annulée peut être imprimée comme payée' });
+    const flag = enabled
+      ? { definitive_paid: true, by: req.user?.id || null, at: new Date().toISOString() }
+      : { definitive_paid: false, by: req.user?.id || null, at: new Date().toISOString() };
+    await db.query(
+      `UPDATE app.orders SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{invoice_print}', $1::jsonb, true) WHERE id = $2`,
+      [JSON.stringify(flag), rows[0].order_id]
+    );
+    res.json({ data: await refreshInvoice(rows[0]) });
   } catch (err) {
     next(err);
   }
